@@ -2,6 +2,7 @@ import streamlit as st
 import math
 from collections import Counter
 
+
 # --- INVENTORY CONSTANTS ---
 GERMAN_GREEN = {92.0: 20, 80.0: 9, 40.0: 6, 38.0: 6, 27.0: 8, 23.0: 8, 20.0: 16, 19.0: 2, 12.0: 18, 10.0: 15}
 GERMAN_YELLOW = {92.0: 15, 80.0: 9, 40.0: 10, 38.0: 9, 27.0: 10, 23.0: 0, 20.0: 29, 19.0: 3, 12.0: 7, 10.0: 11, 9.6: 6}
