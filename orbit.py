@@ -104,7 +104,7 @@ st.set_page_config(page_title="Orbit Factory ERP", layout="wide", page_icon="⚙
 
 # إدراج الشعار
 try:
-    st.image("orbit-pic.jpg", width=250)
+    st.image("orbit-pic.png", width=250)
 except:
     pass
 
