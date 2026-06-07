@@ -101,9 +101,24 @@ class OrbitSlittingCalculator:
 # --- STREAMLIT UI ---
 st.set_page_config(page_title="Orbit Factory ERP", layout="wide", page_icon="⚙️")
 
+# حقن كود CSS لإعطاء الشعار خلفية سوداء أنيقة
+st.markdown("""
+    <style>
+    /* استهداف حاوية الصورة وإضافة التصميم عليها */
+    [data-testid="stImage"] {
+        background-color: #0b0f19; /* لون أسود داكن جداً */
+        padding: 15px;
+        border-radius: 12px; /* حواف دائرية */
+        border: 1px solid #333; /* إطار خفيف جداً */
+        width: fit-content;
+        margin-bottom: 20px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # إدراج الشعار
 try:
-    st.image("logo1.png", width=250)
+    st.image("logo.png", width=250)
 except:
     pass
 
@@ -178,14 +193,12 @@ with tab1:
                     st.info("✅ الكمية مناسبة! تم إيجاد خيارات تتطابق مع المخزون.")
                     
                     for i, arbor_setup in enumerate(options):
-                        # العنوان بخلفية صفراء بارزة للفصل بين الخيارات
                         st.markdown(f"""
                         <div style="background-color: #ffeb3b; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #fbc02d;">
                             <h3 style="margin: 0; color: #000; text-align: center;">🛠️ الخيار الهندسي رقم {i + 1}</h3>
                         </div>
                         """, unsafe_allow_html=True)
                         
-                        # --- 1. BILL OF MATERIALS (BOM) HIDDEN IN EXPANDER ---
                         total_top = Counter()
                         total_bottom = Counter()
                         for setup in arbor_setup:
@@ -207,7 +220,6 @@ with tab1:
                                     t_type = "ربر أخضر" if size >= 9.0 else "سبسر"
                                     st.write(f"- {t_type} مقاس {size} mm: **{count} حبة**")
                                 
-                        # --- 2. DETAILED SLIT BREAKDOWN VISIBLE ---
                         st.markdown("### 🔍 تفاصيل التركيب لكل شرحة:")
                         for slit_idx, setup in enumerate(arbor_setup):
                             st.markdown(f"#### 🔹 الشرحة {slit_idx + 1} (الهدف: {slit_widths[slit_idx]:.2f} mm)")
@@ -318,10 +330,10 @@ with tab4:
         st.markdown("### 📊 ملخص التقسيم المتساوي")
         st.metric(label="طول الدفعة الواحدة", value=f"{batch_length:,.1f} متر")
         
-        st.progress(1.0) # شريط مرئي لجمالية التصميم
+        st.progress(1.0)
         
         st.markdown("#### 📦 نظرة عامة على الدفعات:")
-        b_cols = st.columns(min(num_batches, 6)) # وضعها في أعمدة حتى 6 في الصف الواحد
+        b_cols = st.columns(min(num_batches, 6))
         
         for i in range(int(num_batches)):
             with b_cols[i % len(b_cols)]:
