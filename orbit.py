@@ -118,7 +118,7 @@ st.markdown("""
 
 # إدراج الشعار
 try:
-    st.image("logo.png", width=250)
+    st.image("logo1.png", width=250)
 except:
     pass
 
