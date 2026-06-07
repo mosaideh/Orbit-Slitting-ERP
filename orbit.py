@@ -2,13 +2,12 @@ import streamlit as st
 import math
 from collections import Counter
 
-
 # --- INVENTORY CONSTANTS ---
 GERMAN_GREEN = {92.0: 20, 80.0: 9, 40.0: 6, 38.0: 6, 27.0: 8, 23.0: 8, 20.0: 16, 19.0: 2, 12.0: 18, 10.0: 15}
 GERMAN_YELLOW = {92.0: 15, 80.0: 9, 40.0: 10, 38.0: 9, 27.0: 10, 23.0: 0, 20.0: 29, 19.0: 3, 12.0: 7, 10.0: 11, 9.6: 6}
 CHINESE_GREEN = {92.0: 10, 80.0: 11, 38.0: 11, 23.0: 11, 20.0: 12}
 CHINESE_YELLOW = {92.0: 10, 80.0: 11, 40.0: 1, 38.0: 13, 23.0: 10, 20.0: 11}
-METAL_SPACERS_LIST = [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0]
+METAL_SPACERS_LIST = [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0, 0.5]
 
 # --- THE CORE LOGIC ---
 class OrbitSlittingCalculator:
@@ -274,7 +273,6 @@ with tab3:
         else:
             outer_diameter = st.number_input("القطر الخارجي OD (mm):", value=983.0)
             inner_diameter = st.number_input("القطر الداخلي ID (mm):", value=508.0)
-            # إضافة معامل الرص لمعايرة الفراغات بين طبقات الصاج
             packing_factor = st.number_input("معامل الرص (Packing Factor %):", min_value=50.0, max_value=100.0, value=88.5, step=0.5, help="الصاج الملفوف يحتوي على فراغات هواء دقيقة تقلل من الوزن الفعلي مقارنة بالكتلة الصلبة.") / 100.0
             
     if st.button("احسب بيانات الكويل", type="primary"):
@@ -284,8 +282,6 @@ with tab3:
             if calc_mode == "حساب الطول من الوزن":
                 coil_length = coil_weight / weight_per_meter
             else:
-                # المعادلة الهندسية: الطول = المساحة الجانبية / السماكة
-                # Area = (pi / 4) * (OD^2 - ID^2) * Packing Factor
                 area_mm2 = (math.pi / 4.0) * ((outer_diameter**2) - (inner_diameter**2)) * packing_factor
                 coil_length = area_mm2 / (thickness_coil * 1000.0)
                 coil_weight = coil_length * weight_per_meter
@@ -302,43 +298,31 @@ with tab3:
             st.info(f"💡 انسخ الطول ({coil_length:,.1f} متر) لاستخدامه في تخطيط الدفعات في التبويب التالي.")
 
 # -----------------------------------------
-# TAB 4: BATCH PLANNING
+# TAB 4: BATCH PLANNING (تخطيط دفعات الإنتاج)
 # -----------------------------------------
 with tab4:
     st.header("تخطيط دفعات الإنتاج للكويل")
-    st.markdown("قسم الكويل الرئيسي إلى دفعات تصنيعية وحدد طول كل دفعة.")
+    st.markdown("سيتم تقسيم الكويل الرئيسي بالتساوي على عدد الدفعات المطلوبة.")
     
-    main_length = st.number_input("الطول الإجمالي للكويل (متر):", min_value=1.0, value=5000.0, step=10.0)
-    num_batches = st.number_input("عدد الدفعات (Batches):", min_value=1, max_value=20, value=2, step=1)
+    col_batch1, col_batch2 = st.columns(2)
+    with col_batch1:
+        main_length = st.number_input("الطول الإجمالي للكويل (متر):", min_value=1.0, value=5000.0, step=10.0)
+    with col_batch2:
+        num_batches = st.number_input("عدد الدفعات المطلوبة (Batches):", min_value=1, max_value=50, value=2, step=1)
     
     st.divider()
-    st.subheader("أطوال الدفعات (متر)")
     
-    batch_lengths = []
-    b_cols = st.columns(min(num_batches, 4))
-    
-    for i in range(int(num_batches)):
-        with b_cols[i % len(b_cols)]:
-            b_len = st.number_input(f"طول الدفعة {i+1} (متر):", min_value=0.0, value=float(main_length/num_batches), step=10.0, key=f"batch_{i}")
-            batch_lengths.append(b_len)
-            
-    total_batches = sum(batch_lengths)
-    remaining = main_length - total_batches
-    
-    st.markdown("### ملخص الإنتاج")
-    
-    if total_batches > main_length:
-        st.error(f"⚠️ خطأ: مجموع أطوال الدفعات ({total_batches:,.1f} م) يتجاوز الطول الكلي للكويل ({main_length:,.1f} م)!")
-        st.progress(1.0)
-    else:
-        percentage = total_batches / main_length
-        st.progress(percentage)
+    if num_batches > 0:
+        batch_length = main_length / num_batches
         
-        col_res1, col_res2 = st.columns(2)
-        col_res1.metric("مجموع أطوال الدفعات الحالية", f"{total_batches:,.1f} متر")
-        col_res2.metric("الطول المتبقي من الكويل", f"{remaining:,.1f} متر")
+        st.markdown("### 📊 ملخص التقسيم المتساوي")
+        st.metric(label="طول الدفعة الواحدة", value=f"{batch_length:,.1f} متر")
         
-        if remaining == 0:
-            st.success("✅ تم توزيع الكويل بالكامل بدقة على الدفعات.")
-        else:
-            st.info("ℹ️ يوجد طول متبقي في الكويل يمكن توزيعه على الدفعات أو تخزينه كباقي (Remnant).")
+        st.progress(1.0) # شريط مرئي لجمالية التصميم
+        
+        st.markdown("#### 📦 نظرة عامة على الدفعات:")
+        b_cols = st.columns(min(num_batches, 6)) # وضعها في أعمدة حتى 6 في الصف الواحد
+        
+        for i in range(int(num_batches)):
+            with b_cols[i % len(b_cols)]:
+                st.info(f"**الدفعة {i+1}**\n\n{batch_length:,.1f} م")
