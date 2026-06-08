@@ -9,7 +9,7 @@ CHINESE_GREEN = {92.0: 10, 80.0: 11, 38.0: 11, 23.0: 11, 20.0: 12}
 CHINESE_YELLOW = {92.0: 10, 80.0: 11, 40.0: 1, 38.0: 13, 23.0: 10, 20.0: 11}
 METAL_SPACERS_LIST = [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0, 0.5]
 
-# --- THE CORE LOGIC ---
+# --- THE CORE LOGIC (V6: TWO-STAGE DIVERSITY ENGINE) ---
 class OrbitSlittingCalculator:
     def __init__(self, top_inv, bottom_inv, spacer_inv):
         self.top_inv = top_inv       
@@ -26,81 +26,141 @@ class OrbitSlittingCalculator:
         elif 1.35 <= thickness <= 1.60: return top_offset, 30.18
         else: return None, None
 
-    def _find_single_combo(self, target_width, rubber_inv, spacer_inv, banned_sizes=set()):
+    def _get_optimized_combos(self, target_width, r_inv, s_inv):
+        """المحرك الثنائي: يفصل السبسرات عن الربرات لضمان إيجاد تشكيلات متنوعة للربر (مثل 92+80) بسرعة فائقة"""
         target_int = int(round(target_width * 100))
-        inv_int = {}
-        for size, qty in rubber_inv.items():
-            if qty > 0 and size not in banned_sizes: inv_int[int(round(size * 100))] = qty
-        for size, qty in spacer_inv.items():
-            if qty > 0: inv_int[int(round(size * 100))] = qty
-                
-        sizes_int = sorted(inv_int.keys(), reverse=True)
-        dp = {0: []}
         
-        for current_width in range(1, target_int + 1):
-            best_combo = None
-            for size in sizes_int:
-                if current_width - size in dp:
-                    prev_combo = dp[current_width - size]
-                    if prev_combo.count(size) < inv_int[size]:
-                        combo = prev_combo + [size]
-                        if best_combo is None or len(combo) < len(best_combo): best_combo = combo
-            if best_combo is not None: dp[current_width] = best_combo
+        # تحويل الأرقام إلى قيم صحيحة لمنع مشاكل الفواصل العشرية
+        r_inv_int = {int(round(s*100)): q for s, q in r_inv.items() if s >= 9.0 and q > 0}
+        s_inv_int = {int(round(s*100)): q for s, q in s_inv.items() if q > 0}
+        
+        r_sizes = sorted(r_inv_int.keys(), reverse=True)
+        s_sizes = sorted(s_inv_int.keys(), reverse=True)
+        
+        # المرحلة 1: حل جميع احتمالات السبسرات مبكراً (DP)
+        dp_sp = {0: []}
+        for w in range(1, target_int + 1):
+            best = None
+            for sp in s_sizes:
+                if w - sp in dp_sp:
+                    prev = dp_sp[w - sp]
+                    if prev.count(sp) < s_inv_int.get(sp, 0):
+                        cand = prev + [sp]
+                        if best is None or len(cand) < len(best):
+                            best = cand
+            if best is not None:
+                dp_sp[w] = best
+                
+        # المرحلة 2: البحث المتعمق في الربرات فقط
+        combos = []
+        def search_rubbers(rem, current_r, s_idx):
+            if rem in dp_sp:
+                combos.append(current_r + dp_sp[rem])
+                
+            if s_idx >= len(r_sizes):
+                return
+                
+            size = r_sizes[s_idx]
+            max_q = min(r_inv_int[size], rem // size)
             
-        if target_int in dp: return [x / 100.0 for x in dp[target_int]]
-        return None
+            for q in range(max_q, 0, -1):
+                search_rubbers(rem - q * size, current_r + [size]*q, s_idx + 1)
+            search_rubbers(rem, current_r, s_idx + 1)
+            
+        search_rubbers(target_int, [], 0)
+        
+        # ترتيب الحلول حسب الأقل قطعاً
+        combos.sort(key=len)
+        return [[x/100.0 for x in c] for c in combos]
+
+    def _find_single_combo(self, target_width, rubber_inv, spacer_inv):
+        res = self._get_optimized_combos(target_width, rubber_inv, spacer_inv)
+        return res[0] if res else None
 
     def get_multiple_arbor_options(self, slit_targets, max_options=5):
-        solutions = []
-        banned_rubbers = set()
-        
-        for _ in range(max_options):
-            temp_bottleneck = {}
-            for size in set(self.top_inv.keys()) | set(self.bottom_inv.keys()):
-                temp_bottleneck[size] = min(self.top_inv.get(size, 0), self.bottom_inv.get(size, 0))
-                
-            temp_spacers = dict(self.spacer_inv)
-            arbor_setup = []
-            failed = False
-            used_rubbers_in_option = []
+        # توحيد المخزون للعمودين (نعتمد الحد الأدنى المشترك للربر المزدوج)
+        bottleneck_inv = {}
+        for s in set(self.top_inv.keys()) | set(self.bottom_inv.keys()):
+            bottleneck_inv[s] = min(self.top_inv.get(s, 0), self.bottom_inv.get(s, 0))
             
-            for target in slit_targets:
-                combo = self._find_single_combo(target, temp_bottleneck, temp_spacers, banned_rubbers)
-                if not combo: failed = True; break
+        all_slit_combos = []
+        for t in slit_targets:
+            all_slit_combos.append(self._get_optimized_combos(t, bottleneck_inv, self.spacer_inv))
+            
+        valid_arbors = []
+        
+        # دمج الشرحات لبناء أعمدة كاملة (Arbors)
+        def build_arbor(slit_idx, current_r_inv, current_arbor):
+            if len(valid_arbors) >= 300: # حد التوقف السريع
+                return
+            if slit_idx == len(slit_targets):
+                valid_arbors.append(current_arbor)
+                return
                 
-                rubbers = sorted([x for x in combo if x >= 9.0], reverse=True)
-                spacers = sorted([x for x in combo if x < 9.0], reverse=True)
-                
-                for r in rubbers:
-                    temp_bottleneck[r] -= 1
-                    used_rubbers_in_option.append(r)
-                for s in spacers:
-                    temp_spacers[s] -= 1
-                    
-                if len(rubbers) == 1:
-                    top_y, top_g = rubbers, []
-                    bot_g, bot_y = rubbers, []
-                elif len(rubbers) > 1:
-                    top_y = rubbers[:-1] 
-                    top_g = [rubbers[-1]] 
-                    bot_g = rubbers[:-1] 
-                    bot_y = [rubbers[-1]] 
-                else:
-                    top_y, top_g, bot_g, bot_y = [], [], [], []
-                
-                arbor_setup.append({
-                    'rubbers_used': rubbers,
-                    'top': {'yellow': top_y, 'green': top_g, 'spacers': spacers},
-                    'bottom': {'green': bot_g, 'yellow': bot_y, 'spacers': spacers}
-                })
-                
-            if not failed:
-                solutions.append(arbor_setup)
-                if used_rubbers_in_option: banned_rubbers.add(max(used_rubbers_in_option))
-                else: break
-            else:
+            for combo in all_slit_combos[slit_idx]:
+                c_counts = Counter([x for x in combo if x >= 9.0])
+                possible = True
+                for s, q in c_counts.items():
+                    if current_r_inv.get(s, 0) < q:
+                        possible = False
+                        break
+                if possible:
+                    new_inv = dict(current_r_inv)
+                    for s, q in c_counts.items():
+                        new_inv[s] -= q
+                    build_arbor(slit_idx + 1, new_inv, current_arbor + [combo])
+
+        build_arbor(0, bottleneck_inv, [])
+        
+        if not valid_arbors:
+            return []
+            
+        # فرز الأعمدة ليكون الخيار الأول هو الأقل قطعاً على الإطلاق (الجشع)
+        valid_arbors.sort(key=lambda arb: sum(len(c) for c in arb))
+        
+        selected_options = []
+        seen_signatures = set()
+        
+        for arbor in valid_arbors:
+            if len(selected_options) >= max_options:
                 break
-        return solutions
+                
+            # إنشاء بصمة (Signature) للتأكد من وجود تنوع معقول في استخدام الربرات
+            rubbers_flat = []
+            for combo in arbor:
+                rubbers_flat.extend([x for x in combo if x >= 9.0])
+            
+            c = Counter(rubbers_flat)
+            sig = (c.get(92.0, 0), c.get(80.0, 0), c.get(40.0, 0), c.get(38.0, 0))
+            
+            if sig not in seen_signatures:
+                seen_signatures.add(sig)
+                
+                formatted_arbor = []
+                for combo in arbor:
+                    r_used = sorted([x for x in combo if x >= 9.0], reverse=True)
+                    s_used = sorted([x for x in combo if x < 9.0], reverse=True)
+                    
+                    # التوزيع الهندسي للعمودين (انعكاس الألوان)
+                    if len(r_used) == 1:
+                        top_y, top_g = r_used, []
+                        bot_g, bot_y = r_used, []
+                    elif len(r_used) > 1:
+                        top_y = r_used[:-1] 
+                        top_g = [r_used[-1]] 
+                        bot_g = r_used[:-1] 
+                        bot_y = [r_used[-1]] 
+                    else:
+                        top_y, top_g, bot_g, bot_y = [], [], [], []
+                        
+                    formatted_arbor.append({
+                        'rubbers_used': r_used,
+                        'top': {'yellow': top_y, 'green': top_g, 'spacers': s_used},
+                        'bottom': {'green': bot_g, 'yellow': bot_y, 'spacers': s_used}
+                    })
+                selected_options.append(formatted_arbor)
+                
+        return selected_options
 
 # --- SMART ALLOY ENGINE ---
 def analyze_alloy(alloy_code, thickness, width):
@@ -118,11 +178,11 @@ def analyze_alloy(alloy_code, thickness, width):
     back_tension = recoiler_tension * 0.5 
     
     if thickness < 0.35:
-        taper_pct, taper_reason = 40, "سماكة رقيقة: تحتاج تخفيض عالي (40%) لمنع انهيار الكويل."
+        taper_pct, taper_reason = 40, "سماكة رقيقة: تحتاج تخفيض عالي (40%) لمنع انهيار الكويل الداخلي."
     elif 0.35 <= thickness < 0.8:
         taper_pct, taper_reason = 30, "سماكة متوسطة: تخفيض قياسي (30%) لمنع انبعاج الحواف."
     else:
-        taper_pct, taper_reason = 15, "سماكة عالية: تتحمل الضغط، تخفيض بسيط (15%) فقط."
+        taper_pct, taper_reason = 15, "سماكة عالية: تتحمل الضغط العالي، تخفيض بسيط (15%) فقط."
         
     end_tension = recoiler_tension * (1 - (taper_pct / 100))
     return cls, recoiler_tension, back_tension, taper_pct, end_tension, taper_reason
@@ -134,7 +194,6 @@ st.markdown("""
     <style>
     [data-testid="stImage"] { background-color: #0b0f19; padding: 15px; border-radius: 12px; border: 1px solid #333; width: fit-content; margin-bottom: 20px;}
     .metric-card { background-color: #f8f9fa; border-left: 5px solid #0056b3; padding: 15px; border-radius: 5px; margin-bottom: 10px; color: #000;}
-    /* تعديل بسيط لمحاذاة الشيك بوكس مع العداد */
     .stCheckbox { margin-top: 6px; } 
     </style>
 """, unsafe_allow_html=True)
@@ -151,13 +210,12 @@ st.markdown("---")
 # SIDEBAR: SETUP & LIVE INVENTORY
 # -----------------------------------------
 st.sidebar.header("⚙️ المخزون المتاح حالياً")
-rubber_origin = st.sidebar.radio("اختر نوع الربر بناءً على السماكة:", ["ألماني ", "صيني "])
+rubber_origin = st.sidebar.radio("اختر نوع الربر بناءً على السماكة:", ["ألماني (أقل من 0.7 mm)", "صيني (أعلى من 0.7 mm)"])
 origin_key = "ألماني" if "ألماني" in rubber_origin else "صيني"
 st.sidebar.divider()
 
 active_top, active_bottom, active_spacers = {}, {}, {}
 
-# دالة مساعدة لإنشاء صف (Checkbox + NumberInput)
 def create_inventory_row(label, default_qty, key_prefix):
     col1, col2 = st.columns([3, 2])
     with col1:
@@ -220,8 +278,20 @@ with tab1:
                 if options:
                     st.info("✅ الكمية مناسبة! تم تجميع الخيارات بشكل متطابق هندسياً.")
                     for i, arbor_setup in enumerate(options):
-                        st.markdown(f"""<div style="background-color: #ffeb3b; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #fbc02d;">
-                            <h3 style="margin: 0; color: #000; text-align: center;">🛠️ الخيار الهندسي رقم {i + 1}</h3></div>""", unsafe_allow_html=True)
+                        
+                        # تمييز الخيار الأول (الجشع) عن الخيارات البديلة (المرنة)
+                        if i == 0:
+                            st.markdown("""
+                            <div style="background-color: #e3f2fd; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #2196f3;">
+                                <h3 style="margin: 0; color: #0d47a1; text-align: center;">🚀 الخيار الأول: التجميع القياسي (أقل عدد قطع ممكن)</h3>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            st.markdown(f"""
+                            <div style="background-color: #ffeb3b; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #fbc02d;">
+                                <h3 style="margin: 0; color: #000; text-align: center;">🛠️ الخيار المرن رقم {i + 1} (تنويع ذكي لتسهيل التركيب)</h3>
+                            </div>
+                            """, unsafe_allow_html=True)
                         
                         total_rubbers = Counter()
                         for setup in arbor_setup: total_rubbers.update(setup['rubbers_used'])
