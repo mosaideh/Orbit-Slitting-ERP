@@ -203,14 +203,14 @@ try:
 except:
     pass
 
-st.title("🏭 نظام أوربيت لإدارة التشريح والإنتاج")
+st.title("🏭 نظام أوربت لإدارة التشريح والإنتاج")
 st.markdown("---")
 
 # -----------------------------------------
 # SIDEBAR: SETUP & LIVE INVENTORY
 # -----------------------------------------
 st.sidebar.header("⚙️ المخزون المتاح حالياً")
-rubber_origin = st.sidebar.radio("اختر نوع الربر بناءً على السماكة:", ["ألماني (أقل من 0.7 mm)", "صيني (أعلى من 0.7 mm)"])
+rubber_origin = st.sidebar.radio("اختر نوع الربر بناءً على السماكة:", ["ألماني", "صيني"])
 origin_key = "ألماني" if "ألماني" in rubber_origin else "صيني"
 st.sidebar.divider()
 
