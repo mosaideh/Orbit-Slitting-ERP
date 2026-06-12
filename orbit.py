@@ -5,10 +5,11 @@ from collections import Counter
 # --- STREAMLIT CONFIG & TRANSLATION ENGINE ---
 st.set_page_config(page_title="Orbit Factory ERP", layout="wide", page_icon="⚙️")
 
-# جعل الإنجليزية هي اللغة الافتراضية
-lang = st.sidebar.radio("🌐 Interface / واجهة المستخدم", ["English", "العربية"])
+# لغة الواجهة (في أعلى القائمة الجانبية)
+lang = st.sidebar.radio("🌐 Interface / واجهة المستخدم", ["العربية", "English"])
 
 def tr(ar_text, en_text):
+    """دالة الترجمة الذكية اللحظية"""
     return en_text if lang == "English" else ar_text
 
 # --- INVENTORY CONSTANTS ---
@@ -18,7 +19,7 @@ CHINESE_GREEN = {92.0: 10, 80.0: 11, 38.0: 11, 23.0: 11, 20.0: 12}
 CHINESE_YELLOW = {92.0: 10, 80.0: 11, 40.0: 1, 38.0: 13, 23.0: 10, 20.0: 11}
 METAL_SPACERS_LIST = [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0, 0.5]
 
-# --- THE CORE LOGIC (V9: PENALTY-BASED HYBRID ENGINE) ---
+# --- THE CORE LOGIC (V6: TWO-STAGE DIVERSITY ENGINE) ---
 class OrbitSlittingCalculator:
     def __init__(self, top_inv, bottom_inv, spacer_inv):
         self.top_inv = top_inv       
@@ -35,152 +36,79 @@ class OrbitSlittingCalculator:
         elif 1.35 <= thickness <= 1.60: return top_offset, 30.18
         else: return None, None
 
-    def _find_single_combo_legacy(self, target_width, rubber_inv, spacer_inv):
+    def _get_optimized_combos(self, target_width, r_inv, s_inv):
         target_int = int(round(target_width * 100))
-        sizes = sorted([int(round(s*100)) for s,q in list(rubber_inv.items()) + list(spacer_inv.items()) if q>0], reverse=True)
-        inv = {int(round(s*100)): q for s,q in list(rubber_inv.items()) + list(spacer_inv.items()) if q>0}
-        dp = {0: []}
+        r_inv_int = {int(round(s*100)): q for s, q in r_inv.items() if s >= 9.0 and q > 0}
+        s_inv_int = {int(round(s*100)): q for s, q in s_inv.items() if q > 0}
+        
+        r_sizes = sorted(r_inv_int.keys(), reverse=True)
+        s_sizes = sorted(s_inv_int.keys(), reverse=True)
+        
+        dp_sp = {0: []}
         for w in range(1, target_int + 1):
             best = None
-            for sz in sizes:
-                if w - sz in dp:
-                    prev = dp[w-sz]
-                    if prev.count(sz) < inv.get(sz, 0):
-                        cand = prev + [sz]
-                        if best is None or len(cand) < len(best): best = cand
-            if best is not None: dp[w] = best
-        if target_int in dp:
-            return sorted([x/100.0 for x in dp[target_int]], reverse=True)
-        return None
-
-    def _get_color_needs(self, top_c_int, bot_c_int):
-        y_n = Counter()
-        g_n = Counter()
-        if len(top_c_int) == 1: 
-            y_n[top_c_int[0]] += 1
-        elif len(top_c_int) > 1:
-            for x in top_c_int[:-1]: y_n[x] += 1
-            g_n[top_c_int[-1]] += 1
+            for sp in s_sizes:
+                if w - sp in dp_sp:
+                    prev = dp_sp[w - sp]
+                    if prev.count(sp) < s_inv_int.get(sp, 0):
+                        cand = prev + [sp]
+                        if best is None or len(cand) < len(best):
+                            best = cand
+            if best is not None:
+                dp_sp[w] = best
+                
+        combos = []
+        def search_rubbers(rem, current_r, s_idx):
+            if rem in dp_sp:
+                combos.append(current_r + dp_sp[rem])
+            if s_idx >= len(r_sizes): return
+                
+            size = r_sizes[s_idx]
+            max_q = min(r_inv_int[size], rem // size)
+            for q in range(max_q, 0, -1):
+                search_rubbers(rem - q * size, current_r + [size]*q, s_idx + 1)
+            search_rubbers(rem, current_r, s_idx + 1)
             
-        if len(bot_c_int) == 1: 
-            g_n[bot_c_int[0]] += 1
-        elif len(bot_c_int) > 1:
-            for x in bot_c_int[:-1]: g_n[x] += 1
-            y_n[bot_c_int[-1]] += 1
-        return y_n, g_n
+        search_rubbers(target_int, [], 0)
+        combos.sort(key=len)
+        return [[x/100.0 for x in c] for c in combos]
+
+    def _find_single_combo(self, target_width, rubber_inv, spacer_inv):
+        res = self._get_optimized_combos(target_width, rubber_inv, spacer_inv)
+        return res[0] if res else None
 
     def get_multiple_arbor_options(self, slit_targets, max_options=5):
-        s_int = {int(round(k*100)): v for k, v in self.spacer_inv.items() if v > 0}
-        s_sizes = sorted(s_int.keys(), reverse=True)
-        
-        y_inv_int = {int(round(k*100)): v for k, v in self.top_inv.items() if v > 0}
-        g_inv_int = {int(round(k*100)): v for k, v in self.bottom_inv.items() if v > 0}
-        
-        r_sizes_set = set(y_inv_int.keys()) | set(g_inv_int.keys())
-        r_sizes = sorted(list(r_sizes_set), reverse=True)
-        
-        all_slit_combos = []
-        for t_width in slit_targets:
-            target_int = int(round(t_width * 100))
-            dp_sp = {0: []}
-            for w in range(1, target_int + 1):
-                best = None
-                for sp in s_sizes:
-                    if w - sp in dp_sp:
-                        prev = dp_sp[w - sp]
-                        if prev.count(sp) < s_int.get(sp, 0):
-                            cand = prev + [sp]
-                            if best is None or len(cand) < len(best): best = cand
-                if best is not None: dp_sp[w] = best
-                    
-            def find_r(target, max_len=7):
-                res = []
-                def dfs(rem, path, idx):
-                    if rem == 0:
-                        res.append(path)
-                        return
-                    if idx >= len(r_sizes) or len(path) > max_len: return
-                    size = r_sizes[idx]
-                    max_q = min(12, rem // size) 
-                    for q in range(max_q, -1, -1):
-                        dfs(rem - q * size, path + [size]*q, idx + 1)
-                dfs(target, [], 0)
-                return res
-
-            options_for_this_slit = []
-            for sp_w, sp_combo in dp_sp.items():
-                r_w = target_int - sp_w
-                if r_w < 0: continue
-                
-                r_combos = find_r(r_w)
-                for top_c in r_combos:
-                    for bot_c in r_combos:
-                        if top_c.count(9200) == bot_c.count(9200):
-                            y_needs, g_needs = self._get_color_needs(top_c, bot_c)
-                            possible = True
-                            for s, q in y_needs.items():
-                                if y_inv_int.get(s, 0) < q: possible = False; break
-                            if possible:
-                                for s, q in g_needs.items():
-                                    if g_inv_int.get(s, 0) < q: possible = False; break
-                            
-                            if possible:
-                                is_sym = (top_c == bot_c)
-                                # النظام هنا يعاقب التطابق اللامتماثل بـ 50 نقطة لمنع اختياره كخيار أساسي
-                                penalty = 0 if is_sym else 50
-                                cost = len(top_c) + len(bot_c) + len(sp_combo) + penalty
-                                
-                                options_for_this_slit.append({
-                                    'top_r': [x/100.0 for x in top_c],
-                                    'bot_r': [x/100.0 for x in bot_c],
-                                    'sp': [x/100.0 for x in sp_combo],
-                                    'y_needs': y_needs,
-                                    'g_needs': g_needs,
-                                    'is_sym': is_sym,
-                                    'cost': cost
-                                })
+        bottleneck_inv = {}
+        for s in set(self.top_inv.keys()) | set(self.bottom_inv.keys()):
+            bottleneck_inv[s] = min(self.top_inv.get(s, 0), self.bottom_inv.get(s, 0))
             
-            # ترتيب خيارات الشرحة الواحدة بحيث تطفو الخيارات المتطابقة (صفر عقوبة) للأعلى
-            options_for_this_slit.sort(key=lambda x: x['cost'])
-            all_slit_combos.append(options_for_this_slit)
-
+        all_slit_combos = []
+        for t in slit_targets:
+            all_slit_combos.append(self._get_optimized_combos(t, bottleneck_inv, self.spacer_inv))
+            
         valid_arbors = []
-        def build_arbor(slit_idx, rem_y, rem_g, rem_s, current_arbor):
-            if len(valid_arbors) >= 200: return
+        def build_arbor(slit_idx, current_r_inv, current_arbor):
+            if len(valid_arbors) >= 300: return
             if slit_idx == len(slit_targets):
                 valid_arbors.append(current_arbor)
                 return
-                
-            for opt in all_slit_combos[slit_idx]:
-                y_needs, g_needs = opt['y_needs'], opt['g_needs']
-                sp_c = Counter([int(round(x*100)) for x in opt['sp']])
-                
+            for combo in all_slit_combos[slit_idx]:
+                c_counts = Counter([x for x in combo if x >= 9.0])
                 possible = True
-                for s, q in y_needs.items():
-                    if rem_y.get(s, 0) < q: possible = False; break
-                if not possible: continue
-                for s, q in g_needs.items():
-                    if rem_g.get(s, 0) < q: possible = False; break
-                if not possible: continue
-                for s, q in sp_c.items():
-                    if rem_s.get(s, 0) < q: possible = False; break
-                if not possible: continue
-                
-                next_y = dict(rem_y)
-                for s, q in y_needs.items(): next_y[s] -= q
-                next_g = dict(rem_g)
-                for s, q in g_needs.items(): next_g[s] -= q
-                next_s = dict(rem_s)
-                for s, q in sp_c.items(): next_s[s] -= q
-                
-                build_arbor(slit_idx + 1, next_y, next_g, next_s, current_arbor + [opt])
-                
-        build_arbor(0, y_inv_int, g_inv_int, s_int, [])
-        
+                for s, q in c_counts.items():
+                    if current_r_inv.get(s, 0) < q:
+                        possible = False
+                        break
+                if possible:
+                    new_inv = dict(current_r_inv)
+                    for s, q in c_counts.items():
+                        new_inv[s] -= q
+                    build_arbor(slit_idx + 1, new_inv, current_arbor + [combo])
+
+        build_arbor(0, bottleneck_inv, [])
         if not valid_arbors: return []
             
-        # فرز الأعمدة حسب التكلفة الإجمالية لضمان صدارة الأعمدة المتطابقة 100%
-        valid_arbors.sort(key=lambda arb: sum(c['cost'] for c in arb))
+        valid_arbors.sort(key=lambda arb: sum(len(c) for c in arb))
         
         selected_options = []
         seen_signatures = set()
@@ -189,43 +117,34 @@ class OrbitSlittingCalculator:
             if len(selected_options) >= max_options: break
                 
             rubbers_flat = []
-            has_asym = False
             for combo in arbor:
-                rubbers_flat.extend(combo['top_r'])
-                rubbers_flat.extend(combo['bot_r'])
-                if not combo['is_sym']: has_asym = True
+                rubbers_flat.extend([x for x in combo if x >= 9.0])
             
             c = Counter(rubbers_flat)
-            # دمج وجود اللاتماثل في البصمة ليعتبره النظام تنوعاً مستقلاً
-            sig = (c.get(92.0, 0), c.get(80.0, 0), c.get(40.0, 0), c.get(38.0, 0), has_asym)
+            sig = (c.get(92.0, 0), c.get(80.0, 0), c.get(40.0, 0), c.get(38.0, 0))
             
             if sig not in seen_signatures:
                 seen_signatures.add(sig)
-                
                 formatted_arbor = []
                 for combo in arbor:
-                    t_r = sorted(combo['top_r'], reverse=True)
-                    b_r = sorted(combo['bot_r'], reverse=True)
-                    s_used = sorted(combo['sp'], reverse=True)
+                    r_used = sorted([x for x in combo if x >= 9.0], reverse=True)
+                    s_used = sorted([x for x in combo if x < 9.0], reverse=True)
                     
-                    if len(t_r) == 1:
-                        top_y, top_g = t_r, []
-                    elif len(t_r) > 1:
-                        top_y, top_g = t_r[:-1], [t_r[-1]]
+                    if len(r_used) == 1:
+                        top_y, top_g = r_used, []
+                        bot_g, bot_y = r_used, []
+                    elif len(r_used) > 1:
+                        top_y = r_used[:-1] 
+                        top_g = [r_used[-1]] 
+                        bot_g = r_used[:-1] 
+                        bot_y = [r_used[-1]] 
                     else:
-                        top_y, top_g = [], []
-                        
-                    if len(b_r) == 1:
-                        bot_g, bot_y = b_r, []
-                    elif len(b_r) > 1:
-                        bot_g, bot_y = b_r[:-1], [b_r[-1]]
-                    else:
-                        bot_g, bot_y = [], []
+                        top_y, top_g, bot_g, bot_y = [], [], [], []
                         
                     formatted_arbor.append({
+                        'rubbers_used': r_used,
                         'top': {'yellow': top_y, 'green': top_g, 'spacers': s_used},
-                        'bottom': {'green': bot_g, 'yellow': bot_y, 'spacers': s_used},
-                        'is_sym': combo['is_sym']
+                        'bottom': {'green': bot_g, 'yellow': bot_y, 'spacers': s_used}
                     })
                 selected_options.append(formatted_arbor)
                 
@@ -273,7 +192,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 try:
-    st.image("logo.png", width=250)
+    st.image("logo1.png", width=250)
 except:
     pass
 
@@ -303,12 +222,12 @@ with st.sidebar.expander(tr("⚙️ السبسرات (Spacers)", "⚙️ Metal S
     for s in METAL_SPACERS_LIST: 
         active_spacers[s] = create_inventory_row(f"{tr('سبسر', 'Spacer')} {s} mm", 100, f"sp_{s}")
 
-with st.sidebar.expander(tr("🟡 ربر أصفر - علوي (ذكر)", "🟡 Yellow Rubber (Male)"), expanded=True):
+with st.sidebar.expander(tr("🟡 ربر أصفر - علوي (ذكر)", "🟡 Yellow Rubber - Top (Male)"), expanded=True):
     ref_dict_yellow = GERMAN_YELLOW if origin_key == "ألماني" else CHINESE_YELLOW
     for s, qty in ref_dict_yellow.items(): 
         active_top[s] = create_inventory_row(f"{tr('أصفر', 'Yellow')} {s} mm", qty, f"top_{s}")
 
-with st.sidebar.expander(tr("🟢 ربر أخضر - سفلي (أنثى)", "🟢 Green Rubber (Female)"), expanded=True):
+with st.sidebar.expander(tr("🟢 ربر أخضر - سفلي (أنثى)", "🟢 Green Rubber - Bottom (Female)"), expanded=True):
     ref_dict_green = GERMAN_GREEN if origin_key == "ألماني" else CHINESE_GREEN
     for s, qty in ref_dict_green.items(): 
         active_bottom[s] = create_inventory_row(f"{tr('أخضر', 'Green')} {s} mm", qty, f"bot_{s}")
@@ -328,10 +247,10 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([t1_name, t2_name, t3_name, t4_name, t5_n
 # TAB 1: MAIN SLIT CALCULATOR
 # -----------------------------------------
 with tab1:
-    st.header(tr("هندسة وتخطيط الشرحات (مطابقة ذكية)", "Slit Arbor Engineering (Smart Symmetrical Focus)"))
+    st.header(tr("هندسة وتخطيط الشرحات (العلوي والسفلي المتطابق)", "Slit Arbor Engineering (Mirrored Setup)"))
     
     colA, colB = st.columns(2)
-    with colA: coil_width = st.number_input(tr("عرض الكويل الإجمالي (mm):", "Total Mother Coil Width (mm):"), min_value=1.0, value=1000.0, step=1.0)
+    with colA: coil_width = st.number_input(tr("عرض الكويل الإجمالي (mm):", "Total Coil Width (mm):"), min_value=1.0, value=1000.0, step=1.0)
     with colB: num_slits = st.number_input(tr("عدد الشرحات المطلوبة:", "Number of Slits:"), min_value=1, max_value=20, value=3, step=1)
         
     st.divider()
@@ -357,57 +276,41 @@ with tab1:
             else:
                 options = calc.get_multiple_arbor_options(spacer_targets, max_options=5)
                 if options:
-                    st.info(tr("✅ تم إيجاد خيارات ذكية.", "✅ Smart setup options generated."))
+                    st.info(tr("✅ الكمية مناسبة! تم تجميع الخيارات بشكل متطابق هندسياً.", "✅ Inventory Sufficient! Symmetrical setups found."))
                     for i, arbor_setup in enumerate(options):
                         
-                        # تحديد ما إذا كان الخيار يشتمل على تعويض طوارئ (غير متماثل)
-                        has_asym = any(not c['is_sym'] for c in arbor_setup)
-                        
-                        if i == 0 and not has_asym:
+                        if i == 0:
                             st.markdown(f"""
                             <div style="background-color: #e3f2fd; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #2196f3;">
-                                <h3 style="margin: 0; color: #0d47a1; text-align: center;">🚀 {tr('الخيار الأول: التجميع القياسي المتطابق (Symmetrical Setup)', 'Option 1: Standard Symmetrical Setup')}</h3>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        elif has_asym:
-                            st.markdown(f"""
-                            <div style="background-color: #f8d7da; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #dc3545;">
-                                <h3 style="margin: 0; color: #721c24; text-align: center;">⚠️ {tr(f'خيار مساند رقم {i + 1} (استخدام تطابق غير متماثل بسبب نقص المخزون)', f'Fallback Option {i + 1} (Asymmetrical match due to inventory constraints)')}</h3>
+                                <h3 style="margin: 0; color: #0d47a1; text-align: center;">🚀 {tr('الخيار الأول: التجميع القياسي (أقل عدد قطع ممكن)', 'Option 1: Standard Setup (Minimum Pieces)')}</h3>
                             </div>
                             """, unsafe_allow_html=True)
                         else:
                             st.markdown(f"""
                             <div style="background-color: #ffeb3b; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #fbc02d;">
-                                <h3 style="margin: 0; color: #000; text-align: center;">🛠️ {tr(f'الخيار المرن رقم {i + 1} (تنويع متطابق)', f'Flexible Option {i + 1} (Symmetrical Diversity)')}</h3>
+                                <h3 style="margin: 0; color: #000; text-align: center;">🛠️ {tr(f'الخيار المرن رقم {i + 1} (تنويع ذكي لتسهيل التركيب)', f'Flexible Option {i + 1} (Smart Diversity Setup)')}</h3>
                             </div>
                             """, unsafe_allow_html=True)
                         
-                        total_y = Counter()
-                        total_g = Counter()
-                        for setup in arbor_setup:
-                            total_y.update(setup['top']['yellow'])
-                            total_y.update(setup['bottom']['yellow'])
-                            total_g.update(setup['top']['green'])
-                            total_g.update(setup['bottom']['green'])
+                        total_rubbers = Counter()
+                        for setup in arbor_setup: total_rubbers.update(setup['rubbers_used'])
                             
-                        with st.expander(tr("📦 اضغط لمعرفة فاتورة المواد الإجمالية (BOM)", "📦 Click to view Bill of Materials (Total Rubber Required)"), expanded=False):
+                        with st.expander(tr("📦 اضغط لمعرفة فاتورة المواد الإجمالية (BOM)", "📦 Click to view Bill of Materials (BOM)"), expanded=False):
                             bom_c1, bom_c2 = st.columns(2)
                             with bom_c1:
-                                st.info(tr("**إجمالي الربر الأصفر المطلوب (🟡)**", "**Total Yellow Rubber Required (🟡)**"))
+                                st.info(tr("**العمود العلوي (🟡 ذكر)**", "**Top Arbor (🟡 Male)**"))
                                 st.write(f"- 🔪 {tr('سكينة', 'Knife')}: **{num_slits} {tr('حبة', 'pcs')}**")
-                                for size, count in sorted(total_y.items(), reverse=True):
+                                for size, count in sorted(total_rubbers.items(), reverse=True):
                                     st.write(f"- {tr('ربر أصفر مقاس', 'Yellow Rubber size')} {size} mm: **{count} {tr('حبة', 'pcs')}**")
                             with bom_c2:
-                                st.success(tr("**إجمالي الربر الأخضر المطلوب (🟢)**", "**Total Green Rubber Required (🟢)**"))
+                                st.success(tr("**العمود السفلي (🟢 أنثى)**", "**Bottom Arbor (🟢 Female)**"))
                                 st.write(f"- 🔪 {tr('سكينة', 'Knife')}: **{num_slits} {tr('حبة', 'pcs')}**")
-                                for size, count in sorted(total_g.items(), reverse=True):
+                                for size, count in sorted(total_rubbers.items(), reverse=True):
                                     st.write(f"- {tr('ربر أخضر مقاس', 'Green Rubber size')} {size} mm: **{count} {tr('حبة', 'pcs')}**")
                                 
-                        st.markdown(f"### 🔍 {tr('تفاصيل التركيب لكل شرحة:', 'Detailed Setup Per Slit:')}")
+                        st.markdown(f"### 🔍 {tr('تفاصيل التركيب المتطابق لكل شرحة:', 'Detailed Setup Per Slit:')}")
                         for slit_idx, setup in enumerate(arbor_setup):
-                            is_sym = setup['is_sym']
-                            sym_text = tr("✅ متطابق تماماً", "✅ Fully Symmetrical") if is_sym else tr("⚠️ غير متماثل القطع (مساند)", "⚠️ Asymmetrical Backup")
-                            st.markdown(f"#### 🔹 {tr('الشرحة', 'Slit')} {slit_idx + 1} ({slit_widths[slit_idx]:.2f} mm) — *{sym_text}*")
+                            st.markdown(f"#### 🔹 {tr('الشرحة', 'Slit')} {slit_idx + 1} ({slit_widths[slit_idx]:.2f} mm)")
                             c1, c2 = st.columns(2)
                             
                             with c1:
@@ -431,7 +334,7 @@ with tab1:
                                     for s, q in sorted(Counter(setup['bottom']['spacers']).items(), reverse=True): st.markdown(f"- ⚙️ {tr('سبسر', 'Spacer')}: {s} mm (x{q})")
                             st.markdown("---")
                 else:
-                    st.error(tr("❌ المخزون لا يكفي لإنشاء أعمدة بهذه الشرحات حتى مع استخدام البدائل.", "❌ Insufficient inventory to create arbors even with fallback options."))
+                    st.error(tr("❌ المخزون المزدوج (الأصفر والأخضر معاً لنفس المقاس) لا يكفي لتركيب العمودين.", "❌ Dual inventory (Yellow & Green combined) is insufficient for this setup."))
 
 # -----------------------------------------
 # TAB 2: HEAD B OFFSET
@@ -446,11 +349,11 @@ with tab2:
             col1.metric(tr("الجانب العلوي (أصفر)", "Top Offset (Yellow)"), f"{top_target} mm")
             col2.metric(tr("الجانب السفلي (أخضر)", "Bottom Offset (Green)"), f"{bottom_target} mm")
             
-            top_opt = calc._find_single_combo_legacy(top_target, calc.top_inv, calc.spacer_inv)
+            top_opt = calc._find_single_combo(top_target, calc.top_inv, calc.spacer_inv)
             if top_opt: st.info(f"**{tr('الترتيب العلوي:', 'Top Setup:')}** " + " + ".join([f"{s}mm(x{c})" for s, c in sorted(Counter(top_opt).items(), reverse=True)]))
             else: st.warning(tr("المخزون لا يغطي القياس العلوي.", "Inventory insufficient for Top offset."))
                 
-            bot_opt = calc._find_single_combo_legacy(bottom_target, calc.bottom_inv, calc.spacer_inv)
+            bot_opt = calc._find_single_combo(bottom_target, calc.bottom_inv, calc.spacer_inv)
             if bot_opt: st.success(f"**{tr('الترتيب السفلي:', 'Bottom Setup:')}** " + " + ".join([f"{s}mm(x{c})" for s, c in sorted(Counter(bot_opt).items(), reverse=True)]))
             else: st.warning(tr("المخزون لا يغطي القياس السفلي.", "Inventory insufficient for Bottom offset."))
 
