@@ -196,7 +196,7 @@ try:
 except:
     pass
 
-st.title(tr("🏭 نظام أوربيت لإدارة التشريح والإنتاج", "🏭 Orbit Slitting & Production Management System"))
+st.title(tr("🏭 نظام أوربت لإدارة التشريح والإنتاج", "🏭 Orbit Slitting & Production Management System"))
 st.markdown("---")
 
 # -----------------------------------------
