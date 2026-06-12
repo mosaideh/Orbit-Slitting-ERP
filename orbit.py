@@ -5,19 +5,19 @@ from collections import Counter
 # --- STREAMLIT CONFIG & TRANSLATION ENGINE ---
 st.set_page_config(page_title="Orbit Factory ERP", layout="wide", page_icon="⚙️")
 
-# لغة الواجهة (في أعلى القائمة الجانبية)
-lang = st.sidebar.radio("🌐 Interface / واجهة المستخدم", ["العربية", "English"])
+# جعل الإنجليزية هي اللغة الافتراضية (Index 0)
+lang = st.sidebar.radio("🌐 Interface / واجهة المستخدم", ["English", "العربية"])
 
 def tr(ar_text, en_text):
     """دالة الترجمة الذكية اللحظية"""
     return en_text if lang == "English" else ar_text
 
 # --- INVENTORY CONSTANTS ---
-GERMAN_GREEN = {92.0: 20, 80.0: 9, 40.0: 6, 38.0: 6, 27.0: 8, 23.0: 8, 20.0: 16, 19.0: 2, 12.0: 8, 10.0: 18}
+GERMAN_GREEN = {92.0: 20, 80.0: 9, 40.0: 6, 38.0: 6, 27.0: 8, 23.0: 8, 20.0: 16, 19.0: 2, 12.0: 18, 10.0: 15}
 GERMAN_YELLOW = {92.0: 15, 80.0: 9, 40.0: 10, 38.0: 9, 27.0: 10, 23.0: 0, 20.0: 29, 19.0: 3, 12.0: 7, 10.0: 11, 9.6: 6}
 CHINESE_GREEN = {92.0: 10, 80.0: 11, 38.0: 11, 23.0: 11, 20.0: 12}
 CHINESE_YELLOW = {92.0: 10, 80.0: 11, 40.0: 1, 38.0: 13, 23.0: 10, 20.0: 11}
-METAL_SPACERS_LIST = [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0]
+METAL_SPACERS_LIST = [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0, 0.5]
 
 # --- THE CORE LOGIC (V6: TWO-STAGE DIVERSITY ENGINE) ---
 class OrbitSlittingCalculator:
@@ -192,7 +192,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 try:
-    st.image("logo1.png", width=250)
+    st.image("logo.png", width=250)
 except:
     pass
 
@@ -222,12 +222,12 @@ with st.sidebar.expander(tr("⚙️ السبسرات (Spacers)", "⚙️ Metal S
     for s in METAL_SPACERS_LIST: 
         active_spacers[s] = create_inventory_row(f"{tr('سبسر', 'Spacer')} {s} mm", 100, f"sp_{s}")
 
-with st.sidebar.expander(tr("🟡 ربر أصفر - علوي (ذكر)", "🟡 Yellow Rubber - Top (Male)"), expanded=True):
+with st.sidebar.expander(tr("🟡 ربر أصفر - علوي (ذكر)", "🟡 Yellow Rubber (Male)"), expanded=True):
     ref_dict_yellow = GERMAN_YELLOW if origin_key == "ألماني" else CHINESE_YELLOW
     for s, qty in ref_dict_yellow.items(): 
         active_top[s] = create_inventory_row(f"{tr('أصفر', 'Yellow')} {s} mm", qty, f"top_{s}")
 
-with st.sidebar.expander(tr("🟢 ربر أخضر - سفلي (أنثى)", "🟢 Green Rubber - Bottom (Female)"), expanded=True):
+with st.sidebar.expander(tr("🟢 ربر أخضر - سفلي (أنثى)", "🟢 Green Rubber (Female)"), expanded=True):
     ref_dict_green = GERMAN_GREEN if origin_key == "ألماني" else CHINESE_GREEN
     for s, qty in ref_dict_green.items(): 
         active_bottom[s] = create_inventory_row(f"{tr('أخضر', 'Green')} {s} mm", qty, f"bot_{s}")
@@ -250,7 +250,7 @@ with tab1:
     st.header(tr("هندسة وتخطيط الشرحات (العلوي والسفلي المتطابق)", "Slit Arbor Engineering (Mirrored Setup)"))
     
     colA, colB = st.columns(2)
-    with colA: coil_width = st.number_input(tr("عرض الكويل الإجمالي (mm):", "Total Coil Width (mm):"), min_value=1.0, value=1000.0, step=1.0)
+    with colA: coil_width = st.number_input(tr("عرض الكويل الإجمالي (mm):", "Total Mother Coil Width (mm):"), min_value=1.0, value=1000.0, step=1.0)
     with colB: num_slits = st.number_input(tr("عدد الشرحات المطلوبة:", "Number of Slits:"), min_value=1, max_value=20, value=3, step=1)
         
     st.divider()
@@ -282,7 +282,7 @@ with tab1:
                         if i == 0:
                             st.markdown(f"""
                             <div style="background-color: #e3f2fd; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #2196f3;">
-                                <h3 style="margin: 0; color: #0d47a1; text-align: center;">🚀 {tr('الخيار الأول: التجميع القياسي (أقل عدد قطع ممكن)', 'Option 1: Standard Setup (Minimum Pieces)')}</h3>
+                                <h3 style="margin: 0; color: #0d47a1; text-align: center;">🚀 {tr('الخيار الأول: التجميع القياسي (أقل عدد قطع ممكن)', 'Option 1: Standard Setup (Minimum Pieces - Greedy)')}</h3>
                             </div>
                             """, unsafe_allow_html=True)
                         else:
@@ -295,15 +295,15 @@ with tab1:
                         total_rubbers = Counter()
                         for setup in arbor_setup: total_rubbers.update(setup['rubbers_used'])
                             
-                        with st.expander(tr("📦 اضغط لمعرفة فاتورة المواد الإجمالية (BOM)", "📦 Click to view Bill of Materials (BOM)"), expanded=False):
+                        with st.expander(tr("📦 اضغط لمعرفة فاتورة المواد الإجمالية (BOM)", "📦 Click to view Bill of Materials (Total Rubber Required)"), expanded=False):
                             bom_c1, bom_c2 = st.columns(2)
                             with bom_c1:
-                                st.info(tr("**العمود العلوي (🟡 ذكر)**", "**Top Arbor (🟡 Male)**"))
+                                st.info(tr("**إجمالي الربر الأصفر المطلوب (🟡)**", "**Total Yellow Rubber Required (🟡)**"))
                                 st.write(f"- 🔪 {tr('سكينة', 'Knife')}: **{num_slits} {tr('حبة', 'pcs')}**")
                                 for size, count in sorted(total_rubbers.items(), reverse=True):
                                     st.write(f"- {tr('ربر أصفر مقاس', 'Yellow Rubber size')} {size} mm: **{count} {tr('حبة', 'pcs')}**")
                             with bom_c2:
-                                st.success(tr("**العمود السفلي (🟢 أنثى)**", "**Bottom Arbor (🟢 Female)**"))
+                                st.success(tr("**إجمالي الربر الأخضر المطلوب (🟢)**", "**Total Green Rubber Required (🟢)**"))
                                 st.write(f"- 🔪 {tr('سكينة', 'Knife')}: **{num_slits} {tr('حبة', 'pcs')}**")
                                 for size, count in sorted(total_rubbers.items(), reverse=True):
                                     st.write(f"- {tr('ربر أخضر مقاس', 'Green Rubber size')} {size} mm: **{count} {tr('حبة', 'pcs')}**")
