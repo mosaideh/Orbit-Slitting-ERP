@@ -16,9 +16,9 @@ GERMAN_GREEN = {92.0: 20, 80.0: 9, 40.0: 6, 38.0: 6, 27.0: 8, 23.0: 8, 20.0: 16,
 GERMAN_YELLOW = {92.0: 15, 80.0: 9, 40.0: 10, 38.0: 9, 27.0: 10, 23.0: 0, 20.0: 29, 19.0: 3, 12.0: 7, 10.0: 11, 9.6: 6}
 CHINESE_GREEN = {92.0: 10, 80.0: 11, 38.0: 11, 23.0: 11, 20.0: 12}
 CHINESE_YELLOW = {92.0: 10, 80.0: 11, 40.0: 1, 38.0: 13, 23.0: 10, 20.0: 11}
-METAL_SPACERS_LIST = [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0]
+METAL_SPACERS_LIST = [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0, 0.5]
 
-# --- THE CORE LOGIC (V10: STRICT DIVERSITY & SPACER PENALTY) ---
+# --- THE CORE LOGIC (V9: PENALTY-BASED HYBRID ENGINE) ---
 class OrbitSlittingCalculator:
     def __init__(self, top_inv, bottom_inv, spacer_inv):
         self.top_inv = top_inv       
@@ -69,7 +69,7 @@ class OrbitSlittingCalculator:
             y_n[bot_c_int[-1]] += 1
         return y_n, g_n
 
-    def get_multiple_arbor_options(self, slit_targets, max_options=7):
+    def get_multiple_arbor_options(self, slit_targets, max_options=5):
         s_int = {int(round(k*100)): v for k, v in self.spacer_inv.items() if v > 0}
         s_sizes = sorted(s_int.keys(), reverse=True)
         
@@ -82,8 +82,6 @@ class OrbitSlittingCalculator:
         all_slit_combos = []
         for t_width in slit_targets:
             target_int = int(round(t_width * 100))
-            
-            # 1. إيجاد أقل عدد ممكن من السبسرات لكل مقاس
             dp_sp = {0: []}
             for w in range(1, target_int + 1):
                 best = None
@@ -128,10 +126,9 @@ class OrbitSlittingCalculator:
                             
                             if possible:
                                 is_sym = (top_c == bot_c)
+                                # النظام هنا يعاقب التطابق اللامتماثل بـ 50 نقطة لمنع اختياره كخيار أساسي
                                 penalty = 0 if is_sym else 50
-                                
-                                # عقوبة قاسية للسبسرات لتقليلها (كل سبسر يعتبر قطعتين)
-                                cost = len(top_c) + len(bot_c) + (len(sp_combo) * 2.0) + penalty
+                                cost = len(top_c) + len(bot_c) + len(sp_combo) + penalty
                                 
                                 options_for_this_slit.append({
                                     'top_r': [x/100.0 for x in top_c],
@@ -143,12 +140,13 @@ class OrbitSlittingCalculator:
                                     'cost': cost
                                 })
             
+            # ترتيب خيارات الشرحة الواحدة بحيث تطفو الخيارات المتطابقة (صفر عقوبة) للأعلى
             options_for_this_slit.sort(key=lambda x: x['cost'])
             all_slit_combos.append(options_for_this_slit)
 
         valid_arbors = []
         def build_arbor(slit_idx, rem_y, rem_g, rem_s, current_arbor):
-            if len(valid_arbors) >= 500: return # زيادة عمق البحث لإيجاد تنوع أكبر
+            if len(valid_arbors) >= 200: return
             if slit_idx == len(slit_targets):
                 valid_arbors.append(current_arbor)
                 return
@@ -181,6 +179,7 @@ class OrbitSlittingCalculator:
         
         if not valid_arbors: return []
             
+        # فرز الأعمدة حسب التكلفة الإجمالية لضمان صدارة الأعمدة المتطابقة 100%
         valid_arbors.sort(key=lambda arb: sum(c['cost'] for c in arb))
         
         selected_options = []
@@ -196,9 +195,9 @@ class OrbitSlittingCalculator:
                 rubbers_flat.extend(combo['bot_r'])
                 if not combo['is_sym']: has_asym = True
             
-            # بصمة صارمة: يجب أن يكون الربر المستخدم مختلفاً جذرياً ليتم قبوله كخيار جديد
             c = Counter(rubbers_flat)
-            sig = (tuple(sorted(c.items())), has_asym)
+            # دمج وجود اللاتماثل في البصمة ليعتبره النظام تنوعاً مستقلاً
+            sig = (c.get(92.0, 0), c.get(80.0, 0), c.get(40.0, 0), c.get(38.0, 0), has_asym)
             
             if sig not in seen_signatures:
                 seen_signatures.add(sig)
@@ -356,30 +355,30 @@ with tab1:
             if any(t < 0 for t in spacer_targets):
                 st.error(tr("أحد الشرحات أصغر من عرض السكينة!", "A slit width is smaller than the knife thickness!"))
             else:
-                # طلب 7 خيارات من الخوارزمية
-                options = calc.get_multiple_arbor_options(spacer_targets, max_options=7)
+                options = calc.get_multiple_arbor_options(spacer_targets, max_options=5)
                 if options:
-                    st.info(tr("✅ تم إيجاد خيارات ذكية ومتنوعة.", "✅ Smart setup options generated."))
+                    st.info(tr("✅ تم إيجاد خيارات ذكية.", "✅ Smart setup options generated."))
                     for i, arbor_setup in enumerate(options):
                         
+                        # تحديد ما إذا كان الخيار يشتمل على تعويض طوارئ (غير متماثل)
                         has_asym = any(not c['is_sym'] for c in arbor_setup)
                         
                         if i == 0 and not has_asym:
                             st.markdown(f"""
                             <div style="background-color: #e3f2fd; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #2196f3;">
-                                <h3 style="margin: 0; color: #0d47a1; text-align: center;">🚀 {tr('الخيار الأول: التجميع القياسي المتطابق (أقل سبسرات)', 'Option 1: Standard Symmetrical Setup (Min Spacers)')}</h3>
+                                <h3 style="margin: 0; color: #0d47a1; text-align: center;">🚀 {tr('الخيار الأول: التجميع القياسي المتطابق (Symmetrical Setup)', 'Option 1: Standard Symmetrical Setup')}</h3>
                             </div>
                             """, unsafe_allow_html=True)
                         elif has_asym:
                             st.markdown(f"""
                             <div style="background-color: #f8d7da; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #dc3545;">
-                                <h3 style="margin: 0; color: #721c24; text-align: center;">⚠️ {tr(f'خيار مساند رقم {i + 1} (تطابق أوزان غير متماثل بسبب نقص المخزون)', f'Fallback Option {i + 1} (Asymmetrical match due to inventory constraints)')}</h3>
+                                <h3 style="margin: 0; color: #721c24; text-align: center;">⚠️ {tr(f'خيار مساند رقم {i + 1} (استخدام تطابق غير متماثل بسبب نقص المخزون)', f'Fallback Option {i + 1} (Asymmetrical match due to inventory constraints)')}</h3>
                             </div>
                             """, unsafe_allow_html=True)
                         else:
                             st.markdown(f"""
                             <div style="background-color: #ffeb3b; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #fbc02d;">
-                                <h3 style="margin: 0; color: #000; text-align: center;">🛠️ {tr(f'الخيار المرن رقم {i + 1} (تنويع متطابق لسهولة التبديل)', f'Flexible Option {i + 1} (Symmetrical Diversity)')}</h3>
+                                <h3 style="margin: 0; color: #000; text-align: center;">🛠️ {tr(f'الخيار المرن رقم {i + 1} (تنويع متطابق)', f'Flexible Option {i + 1} (Symmetrical Diversity)')}</h3>
                             </div>
                             """, unsafe_allow_html=True)
                         
