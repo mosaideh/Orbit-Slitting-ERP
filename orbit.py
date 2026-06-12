@@ -285,7 +285,7 @@ st.markdown("---")
 # -----------------------------------------
 st.sidebar.header(tr("⚙️ المخزون المتاح حالياً", "⚙️ Current Available Inventory"))
 rubber_origin = st.sidebar.radio(tr("اختر نوع الربر بناءً على السماكة:", "Select Rubber Type (by thickness):"), 
-                                 [tr("ألماني (أقل من 0.7 mm)", "German (< 0.7 mm)"), tr("صيني (أعلى من 0.7 mm)", "Chinese (> 0.7 mm)")])
+                                 [tr("ألماني ", "German"), tr("صيني", "Chinese")])
 origin_key = "ألماني" if "ألماني" in rubber_origin or "German" in rubber_origin else "صيني"
 st.sidebar.divider()
 
