@@ -19,7 +19,7 @@ CHINESE_GREEN = {92.0: 10, 80.0: 11, 38.0: 11, 23.0: 11, 20.0: 12}
 CHINESE_YELLOW = {92.0: 10, 80.0: 11, 40.0: 1, 38.0: 13, 23.0: 10, 20.0: 11}
 METAL_SPACERS_LIST = [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0, 0.5]
 
-# --- THE CORE LOGIC (V6: TWO-STAGE DIVERSITY ENGINE) ---
+# --- THE CORE LOGIC (V7: EXPLICIT DIVERSITY ENGINE) ---
 class OrbitSlittingCalculator:
     def __init__(self, top_inv, bottom_inv, spacer_inv):
         self.top_inv = top_inv       
@@ -78,9 +78,15 @@ class OrbitSlittingCalculator:
         return res[0] if res else None
 
     def get_multiple_arbor_options(self, slit_targets, max_options=5):
+        # 1. تم تعريف كل القياسات صراحة هنا بناءً على طلبك لضبط العملية
+        ALL_RUBBER_SIZES = [92.0, 80.0, 40.0, 38.0, 27.0, 23.0, 20.0, 19.0, 12.0, 10.0, 9.6]
+        
         bottleneck_inv = {}
-        for s in set(self.top_inv.keys()) | set(self.bottom_inv.keys()):
-            bottleneck_inv[s] = min(self.top_inv.get(s, 0), self.bottom_inv.get(s, 0))
+        for s in ALL_RUBBER_SIZES:
+            # دالة min تضمن شرط (المطابقة). تأخذ الرقم الأقل المتاح لتكوين أزواج كاملة فقط.
+            top_qty = self.top_inv.get(s, 0)
+            bot_qty = self.bottom_inv.get(s, 0)
+            bottleneck_inv[s] = min(top_qty, bot_qty)
             
         all_slit_combos = []
         for t in slit_targets:
@@ -192,7 +198,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 try:
-    st.image("logo1.png", width=250)
+    st.image("logo.png", width=250)
 except:
     pass
 
