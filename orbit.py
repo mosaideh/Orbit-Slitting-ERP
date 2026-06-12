@@ -17,7 +17,7 @@ GERMAN_GREEN = {92.0: 20, 80.0: 9, 40.0: 6, 38.0: 6, 27.0: 8, 23.0: 8, 20.0: 16,
 GERMAN_YELLOW = {92.0: 15, 80.0: 9, 40.0: 10, 38.0: 9, 27.0: 10, 23.0: 0, 20.0: 29, 19.0: 3, 12.0: 7, 10.0: 11, 9.6: 6}
 CHINESE_GREEN = {92.0: 10, 80.0: 11, 38.0: 11, 23.0: 11, 20.0: 12}
 CHINESE_YELLOW = {92.0: 10, 80.0: 11, 40.0: 1, 38.0: 13, 23.0: 10, 20.0: 11}
-METAL_SPACERS_LIST = [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0, 0.5]
+METAL_SPACERS_LIST = [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0]
 
 # --- THE CORE LOGIC (V6: TWO-STAGE DIVERSITY ENGINE) ---
 class OrbitSlittingCalculator:
@@ -204,7 +204,7 @@ st.markdown("---")
 # -----------------------------------------
 st.sidebar.header(tr("⚙️ المخزون المتاح حالياً", "⚙️ Current Available Inventory"))
 rubber_origin = st.sidebar.radio(tr("اختر نوع الربر بناءً على السماكة:", "Select Rubber Type (by thickness):"), 
-                                 [tr("ألماني (أقل من 0.7 mm)", "German (< 0.7 mm)"), tr("صيني (أعلى من 0.7 mm)", "Chinese (> 0.7 mm)")])
+                                 [tr("ألماني", "German"), tr("صيني", "Chinese")])
 origin_key = "ألماني" if "ألماني" in rubber_origin or "German" in rubber_origin else "صيني"
 st.sidebar.divider()
 
