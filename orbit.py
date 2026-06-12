@@ -192,7 +192,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 try:
-    st.image("logo.png", width=250)
+    st.image("logo1.png", width=250)
 except:
     pass
 
