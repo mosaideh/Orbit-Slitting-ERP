@@ -16,9 +16,9 @@ GERMAN_GREEN = {92.0: 20, 80.0: 9, 40.0: 6, 38.0: 6, 27.0: 8, 23.0: 8, 20.0: 16,
 GERMAN_YELLOW = {92.0: 15, 80.0: 9, 40.0: 10, 38.0: 9, 27.0: 10, 23.0: 0, 20.0: 29, 19.0: 3, 12.0: 7, 10.0: 11, 9.6: 6}
 CHINESE_GREEN = {92.0: 10, 80.0: 11, 38.0: 11, 23.0: 11, 20.0: 12}
 CHINESE_YELLOW = {92.0: 10, 80.0: 11, 40.0: 1, 38.0: 13, 23.0: 10, 20.0: 11}
-METAL_SPACERS_LIST = [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0, 0.5]
+METAL_SPACERS_LIST = [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0]
 
-# --- THE CORE LOGIC (V8: ASYMMETRICAL MATCHING ENGINE) ---
+# --- THE CORE LOGIC (V9: PENALTY-BASED HYBRID ENGINE) ---
 class OrbitSlittingCalculator:
     def __init__(self, top_inv, bottom_inv, spacer_inv):
         self.top_inv = top_inv       
@@ -36,7 +36,6 @@ class OrbitSlittingCalculator:
         else: return None, None
 
     def _find_single_combo_legacy(self, target_width, rubber_inv, spacer_inv):
-        # مخصصة لرأس (Head B) لتعمل بشكل منفصل وسريع
         target_int = int(round(target_width * 100))
         sizes = sorted([int(round(s*100)) for s,q in list(rubber_inv.items()) + list(spacer_inv.items()) if q>0], reverse=True)
         inv = {int(round(s*100)): q for s,q in list(rubber_inv.items()) + list(spacer_inv.items()) if q>0}
@@ -57,14 +56,12 @@ class OrbitSlittingCalculator:
     def _get_color_needs(self, top_c_int, bot_c_int):
         y_n = Counter()
         g_n = Counter()
-        # العلوي: أغلبه أصفر والأخير أخضر
         if len(top_c_int) == 1: 
             y_n[top_c_int[0]] += 1
         elif len(top_c_int) > 1:
             for x in top_c_int[:-1]: y_n[x] += 1
             g_n[top_c_int[-1]] += 1
             
-        # السفلي: أغلبه أخضر والأخير أصفر
         if len(bot_c_int) == 1: 
             g_n[bot_c_int[0]] += 1
         elif len(bot_c_int) > 1:
@@ -79,7 +76,6 @@ class OrbitSlittingCalculator:
         y_inv_int = {int(round(k*100)): v for k, v in self.top_inv.items() if v > 0}
         g_inv_int = {int(round(k*100)): v for k, v in self.bottom_inv.items() if v > 0}
         
-        # دمج مقاسات الربر المتاحة للتوليد (generation)
         r_sizes_set = set(y_inv_int.keys()) | set(g_inv_int.keys())
         r_sizes = sorted(list(r_sizes_set), reverse=True)
         
@@ -117,12 +113,9 @@ class OrbitSlittingCalculator:
                 if r_w < 0: continue
                 
                 r_combos = find_r(r_w)
-                # عملية التزويج الذكية (العلوي والسفلي مستقلان لكن يجمعهما نفس الوزن)
                 for top_c in r_combos:
                     for bot_c in r_combos:
-                        # القاعدة الصارمة: 92 يجب أن يقابله 92
                         if top_c.count(9200) == bot_c.count(9200):
-                            # التحقق المبدئي من المخزون والألوان
                             y_needs, g_needs = self._get_color_needs(top_c, bot_c)
                             possible = True
                             for s, q in y_needs.items():
@@ -132,13 +125,23 @@ class OrbitSlittingCalculator:
                                     if g_inv_int.get(s, 0) < q: possible = False; break
                             
                             if possible:
+                                is_sym = (top_c == bot_c)
+                                # النظام هنا يعاقب التطابق اللامتماثل بـ 50 نقطة لمنع اختياره كخيار أساسي
+                                penalty = 0 if is_sym else 50
+                                cost = len(top_c) + len(bot_c) + len(sp_combo) + penalty
+                                
                                 options_for_this_slit.append({
                                     'top_r': [x/100.0 for x in top_c],
                                     'bot_r': [x/100.0 for x in bot_c],
                                     'sp': [x/100.0 for x in sp_combo],
                                     'y_needs': y_needs,
-                                    'g_needs': g_needs
+                                    'g_needs': g_needs,
+                                    'is_sym': is_sym,
+                                    'cost': cost
                                 })
+            
+            # ترتيب خيارات الشرحة الواحدة بحيث تطفو الخيارات المتطابقة (صفر عقوبة) للأعلى
+            options_for_this_slit.sort(key=lambda x: x['cost'])
             all_slit_combos.append(options_for_this_slit)
 
         valid_arbors = []
@@ -176,8 +179,8 @@ class OrbitSlittingCalculator:
         
         if not valid_arbors: return []
             
-        # فرز الأعمدة لاختيار الأقل قطعاً ليكون الخيار الجشع في الأعلى
-        valid_arbors.sort(key=lambda arb: sum(len(c['top_r']) + len(c['bot_r']) + len(c['sp']) for c in arb))
+        # فرز الأعمدة حسب التكلفة الإجمالية لضمان صدارة الأعمدة المتطابقة 100%
+        valid_arbors.sort(key=lambda arb: sum(c['cost'] for c in arb))
         
         selected_options = []
         seen_signatures = set()
@@ -185,14 +188,16 @@ class OrbitSlittingCalculator:
         for arbor in valid_arbors:
             if len(selected_options) >= max_options: break
                 
-            # إنشاء بصمة للتنويع المعقول
             rubbers_flat = []
+            has_asym = False
             for combo in arbor:
                 rubbers_flat.extend(combo['top_r'])
                 rubbers_flat.extend(combo['bot_r'])
+                if not combo['is_sym']: has_asym = True
             
             c = Counter(rubbers_flat)
-            sig = (c.get(92.0, 0), c.get(80.0, 0), c.get(40.0, 0), c.get(38.0, 0))
+            # دمج وجود اللاتماثل في البصمة ليعتبره النظام تنوعاً مستقلاً
+            sig = (c.get(92.0, 0), c.get(80.0, 0), c.get(40.0, 0), c.get(38.0, 0), has_asym)
             
             if sig not in seen_signatures:
                 seen_signatures.add(sig)
@@ -219,7 +224,8 @@ class OrbitSlittingCalculator:
                         
                     formatted_arbor.append({
                         'top': {'yellow': top_y, 'green': top_g, 'spacers': s_used},
-                        'bottom': {'green': bot_g, 'yellow': bot_y, 'spacers': s_used}
+                        'bottom': {'green': bot_g, 'yellow': bot_y, 'spacers': s_used},
+                        'is_sym': combo['is_sym']
                     })
                 selected_options.append(formatted_arbor)
                 
@@ -322,7 +328,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([t1_name, t2_name, t3_name, t4_name, t5_n
 # TAB 1: MAIN SLIT CALCULATOR
 # -----------------------------------------
 with tab1:
-    st.header(tr("هندسة وتخطيط الشرحات (مطابقة ذكية للأوزان)", "Slit Arbor Engineering (Smart Asymmetrical Matching)"))
+    st.header(tr("هندسة وتخطيط الشرحات (مطابقة ذكية)", "Slit Arbor Engineering (Smart Symmetrical Focus)"))
     
     colA, colB = st.columns(2)
     with colA: coil_width = st.number_input(tr("عرض الكويل الإجمالي (mm):", "Total Mother Coil Width (mm):"), min_value=1.0, value=1000.0, step=1.0)
@@ -351,19 +357,28 @@ with tab1:
             else:
                 options = calc.get_multiple_arbor_options(spacer_targets, max_options=5)
                 if options:
-                    st.info(tr("✅ الكمية مناسبة! تم إيجاد خيارات ذكية متطابقة.", "✅ Inventory Sufficient! Smart combinations found."))
+                    st.info(tr("✅ تم إيجاد خيارات ذكية.", "✅ Smart setup options generated."))
                     for i, arbor_setup in enumerate(options):
                         
-                        if i == 0:
+                        # تحديد ما إذا كان الخيار يشتمل على تعويض طوارئ (غير متماثل)
+                        has_asym = any(not c['is_sym'] for c in arbor_setup)
+                        
+                        if i == 0 and not has_asym:
                             st.markdown(f"""
                             <div style="background-color: #e3f2fd; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #2196f3;">
-                                <h3 style="margin: 0; color: #0d47a1; text-align: center;">🚀 {tr('الخيار الأول: التجميع القياسي (أقل عدد قطع ممكن)', 'Option 1: Standard Setup (Minimum Pieces - Greedy)')}</h3>
+                                <h3 style="margin: 0; color: #0d47a1; text-align: center;">🚀 {tr('الخيار الأول: التجميع القياسي المتطابق (Symmetrical Setup)', 'Option 1: Standard Symmetrical Setup')}</h3>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        elif has_asym:
+                            st.markdown(f"""
+                            <div style="background-color: #f8d7da; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #dc3545;">
+                                <h3 style="margin: 0; color: #721c24; text-align: center;">⚠️ {tr(f'خيار مساند رقم {i + 1} (استخدام تطابق غير متماثل بسبب نقص المخزون)', f'Fallback Option {i + 1} (Asymmetrical match due to inventory constraints)')}</h3>
                             </div>
                             """, unsafe_allow_html=True)
                         else:
                             st.markdown(f"""
                             <div style="background-color: #ffeb3b; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #fbc02d;">
-                                <h3 style="margin: 0; color: #000; text-align: center;">🛠️ {tr(f'الخيار المرن رقم {i + 1} (تنويع ذكي لتسهيل التركيب)', f'Flexible Option {i + 1} (Smart Diversity Setup)')}</h3>
+                                <h3 style="margin: 0; color: #000; text-align: center;">🛠️ {tr(f'الخيار المرن رقم {i + 1} (تنويع متطابق)', f'Flexible Option {i + 1} (Symmetrical Diversity)')}</h3>
                             </div>
                             """, unsafe_allow_html=True)
                         
@@ -388,9 +403,11 @@ with tab1:
                                 for size, count in sorted(total_g.items(), reverse=True):
                                     st.write(f"- {tr('ربر أخضر مقاس', 'Green Rubber size')} {size} mm: **{count} {tr('حبة', 'pcs')}**")
                                 
-                        st.markdown(f"### 🔍 {tr('تفاصيل التركيب المتطابق لكل شرحة:', 'Detailed Setup Per Slit:')}")
+                        st.markdown(f"### 🔍 {tr('تفاصيل التركيب لكل شرحة:', 'Detailed Setup Per Slit:')}")
                         for slit_idx, setup in enumerate(arbor_setup):
-                            st.markdown(f"#### 🔹 {tr('الشرحة', 'Slit')} {slit_idx + 1} ({slit_widths[slit_idx]:.2f} mm)")
+                            is_sym = setup['is_sym']
+                            sym_text = tr("✅ متطابق تماماً", "✅ Fully Symmetrical") if is_sym else tr("⚠️ غير متماثل القطع (مساند)", "⚠️ Asymmetrical Backup")
+                            st.markdown(f"#### 🔹 {tr('الشرحة', 'Slit')} {slit_idx + 1} ({slit_widths[slit_idx]:.2f} mm) — *{sym_text}*")
                             c1, c2 = st.columns(2)
                             
                             with c1:
@@ -414,7 +431,7 @@ with tab1:
                                     for s, q in sorted(Counter(setup['bottom']['spacers']).items(), reverse=True): st.markdown(f"- ⚙️ {tr('سبسر', 'Spacer')}: {s} mm (x{q})")
                             st.markdown("---")
                 else:
-                    st.error(tr("❌ المخزون لا يكفي لإنشاء أعمدة متطابقة الأوزان بهذه الشرحات.", "❌ Insufficient inventory to create structurally matched arbors for these slits."))
+                    st.error(tr("❌ المخزون لا يكفي لإنشاء أعمدة بهذه الشرحات حتى مع استخدام البدائل.", "❌ Insufficient inventory to create arbors even with fallback options."))
 
 # -----------------------------------------
 # TAB 2: HEAD B OFFSET
