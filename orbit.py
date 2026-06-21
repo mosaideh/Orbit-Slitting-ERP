@@ -12,7 +12,8 @@ def tr(ar_text, en_text):
     """دالة الترجمة الذكية اللحظية"""
     return en_text if lang == "English" else ar_text
 
-# --- INVENTORY CONSTANTS ---
+# --- INVENTORY CONSTANTS (HARDCODED) ---
+# تعديل الكميات يتم هنا حصراً ولا يمكن تعديلها من الشاشة
 GERMAN_GREEN = {92.0: 20, 80.0: 9, 40.0: 6, 38.0: 6, 27.0: 8, 23.0: 8, 20.0: 16, 19.0: 2, 12.0: 18, 10.0: 15}
 GERMAN_YELLOW = {92.0: 15, 80.0: 9, 40.0: 10, 38.0: 9, 27.0: 10, 23.0: 0, 20.0: 29, 19.0: 3, 12.0: 7, 10.0: 11, 9.6: 6}
 CHINESE_GREEN = {92.0: 10, 80.0: 11, 38.0: 11, 23.0: 11, 20.0: 12}
@@ -187,6 +188,8 @@ st.markdown("""
     <style>
     [data-testid="stImage"] { background-color: #0b0f19; padding: 15px; border-radius: 12px; border: 1px solid #333; width: fit-content; margin-bottom: 20px;}
     .metric-card { background-color: #f8f9fa; border-left: 5px solid #0056b3; padding: 15px; border-radius: 5px; margin-bottom: 10px; color: #000;}
+    /* تعديل تنسيق العداد الثابت */
+    .fixed-qty { margin-top: 6px; font-weight: bold; color: #0b0f19; background: #e3f2fd; padding: 2px 8px; border-radius: 4px; text-align: center; }
     .stCheckbox { margin-top: 6px; } 
     </style>
 """, unsafe_allow_html=True)
@@ -211,12 +214,13 @@ st.sidebar.divider()
 active_top, active_bottom, active_spacers = {}, {}, {}
 
 def create_inventory_row(label, default_qty, key_prefix):
-    col1, col2 = st.columns([3, 2])
+    # إزالة Number Input واستبداله بنص ثابت للقراءة فقط
+    col1, col2 = st.columns([3, 1])
     with col1:
         is_active = st.checkbox(label, value=True, key=f"chk_{key_prefix}")
     with col2:
-        qty = st.number_input(tr("الكمية", "Qty"), min_value=0, value=default_qty, step=1, key=f"num_{key_prefix}", label_visibility="collapsed")
-    return qty if is_active else 0
+        st.markdown(f"<div class='fixed-qty'>{default_qty}</div>", unsafe_allow_html=True)
+    return default_qty if is_active else 0
 
 with st.sidebar.expander(tr("⚙️ السبسرات (Spacers)", "⚙️ Metal Spacers"), expanded=False):
     for s in METAL_SPACERS_LIST: 
