@@ -5,20 +5,27 @@ from collections import Counter
 # --- STREAMLIT CONFIG & TRANSLATION ENGINE ---
 st.set_page_config(page_title="Orbit Factory ERP", layout="wide", page_icon="⚙️")
 
-# لغة الواجهة (في أعلى القائمة الجانبية)
-lang = st.sidebar.radio("🌐 Interface / واجهة المستخدم", ["العربية", "English"])
+# جعل الإنجليزية هي اللغة الافتراضية (Index 0)
+lang = st.sidebar.radio("🌐 Interface / واجهة المستخدم", ["English", "العربية"])
 
 def tr(ar_text, en_text):
     """دالة الترجمة الذكية اللحظية"""
     return en_text if lang == "English" else ar_text
 
-# --- INVENTORY CONSTANTS (HARDCODED) ---
-# تعديل الكميات يتم هنا حصراً ولا يمكن تعديلها من الشاشة
-GERMAN_GREEN = {92.0: 20, 80.0: 9, 40.0: 6, 38.0: 6, 27.0: 8, 23.0: 8, 20.0: 16, 19.0: 2, 12.0: 18, 10.0: 15}
-GERMAN_YELLOW = {92.0: 15, 80.0: 9, 40.0: 10, 38.0: 9, 27.0: 10, 23.0: 0, 20.0: 29, 19.0: 3, 12.0: 7, 10.0: 11, 9.6: 6}
-CHINESE_GREEN = {92.0: 10, 80.0: 11, 38.0: 11, 23.0: 11, 20.0: 12}
-CHINESE_YELLOW = {92.0: 10, 80.0: 11, 40.0: 1, 38.0: 13, 23.0: 10, 20.0: 11}
-METAL_SPACERS_LIST = [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0]
+# --- INITIALIZE LIVE INVENTORY IN SESSION STATE ---
+# إذا لم تكن الذاكرة الحركية موجودة، يتم إنشاؤها بالقيم الأصلية الثابتة هندسياً
+if 'live_inventory' not in st.session_state:
+    st.session_state.live_inventory = {
+        "ألماني": {
+            "yellow": {92.0: 15, 80.0: 9, 40.0: 10, 38.0: 9, 27.0: 10, 23.0: 0, 20.0: 29, 19.0: 3, 12.0: 7, 10.0: 11, 9.6: 6},
+            "green": {92.0: 20, 80.0: 9, 40.0: 6, 38.0: 6, 27.0: 8, 23.0: 8, 20.0: 16, 19.0: 2, 12.0: 18, 10.0: 15}
+        },
+        "صيني": {
+            "yellow": {92.0: 10, 80.0: 11, 40.0: 1, 38.0: 13, 23.0: 10, 20.0: 11},
+            "green": {92.0: 10, 80.0: 11, 38.0: 11, 23.0: 11, 20.0: 12}
+        },
+        "spacers": [5.0, 3.9, 3.5, 3.2, 3.0, 2.7, 2.5, 2.0, 1.86, 1.68, 1.32, 1.16, 1.14, 1.12, 1.1, 1.08, 1.06, 1.04, 1.02, 1.01, 1.0]
+    }
 
 # --- THE CORE LOGIC (V6: TWO-STAGE DIVERSITY ENGINE) ---
 class OrbitSlittingCalculator:
@@ -188,7 +195,6 @@ st.markdown("""
     <style>
     [data-testid="stImage"] { background-color: #0b0f19; padding: 15px; border-radius: 12px; border: 1px solid #333; width: fit-content; margin-bottom: 20px;}
     .metric-card { background-color: #f8f9fa; border-left: 5px solid #0056b3; padding: 15px; border-radius: 5px; margin-bottom: 10px; color: #000;}
-    /* تعديل تنسيق العداد الثابت */
     .fixed-qty { margin-top: 6px; font-weight: bold; color: #0b0f19; background: #e3f2fd; padding: 2px 8px; border-radius: 4px; text-align: center; }
     .stCheckbox { margin-top: 6px; } 
     </style>
@@ -199,13 +205,20 @@ try:
 except:
     pass
 
-st.title(tr("🏭 نظام أوربت لإدارة التشريح والإنتاج", "🏭 Orbit Slitting & Production Management System"))
+st.title(tr("🏭 نظام أوربيت لإدارة التشريح والإنتاج", "🏭 Orbit Slitting & Production Management System"))
 st.markdown("---")
 
 # -----------------------------------------
-# SIDEBAR: SETUP & LIVE INVENTORY
+# SIDEBAR: SETUP & LIVE INVENTORY MANAGEMENT
 # -----------------------------------------
 st.sidebar.header(tr("⚙️ المخزون المتاح حالياً", "⚙️ Current Available Inventory"))
+
+# زر إعادة تعيين المستودع إلى الكميات الأصلية المأخوذة من صور المصنع
+if st.sidebar.button(tr("🔄 إعادة إنعاش كميات المستودع الأصلية", "🔄 Refresh & Reset to Default Qty"), type="secondary"):
+    if 'live_inventory' in st.session_state:
+        del st.session_state.live_inventory
+    st.rerun()
+
 rubber_origin = st.sidebar.radio(tr("اختر نوع الربر بناءً على السماكة:", "Select Rubber Type (by thickness):"), 
                                  [tr("ألماني", "German"), tr("صيني", "Chinese")])
 origin_key = "ألماني" if "ألماني" in rubber_origin or "German" in rubber_origin else "صيني"
@@ -213,132 +226,151 @@ st.sidebar.divider()
 
 active_top, active_bottom, active_spacers = {}, {}, {}
 
-def create_inventory_row(label, default_qty, key_prefix):
-    # إزالة Number Input واستبداله بنص ثابت للقراءة فقط
+def create_inventory_row(label, current_qty, key_prefix):
     col1, col2 = st.columns([3, 1])
     with col1:
         is_active = st.checkbox(label, value=True, key=f"chk_{key_prefix}")
     with col2:
-        st.markdown(f"<div class='fixed-qty'>{default_qty}</div>", unsafe_allow_html=True)
-    return default_qty if is_active else 0
+        st.markdown(f"<div class='fixed-qty'>{current_qty}</div>", unsafe_allow_html=True)
+    return current_qty if is_active else 0
 
 with st.sidebar.expander(tr("⚙️ السبسرات (Spacers)", "⚙️ Metal Spacers"), expanded=False):
-    for s in METAL_SPACERS_LIST: 
+    for s in st.session_state.live_inventory["spacers"]: 
         active_spacers[s] = create_inventory_row(f"{tr('سبسر', 'Spacer')} {s} mm", 100, f"sp_{s}")
 
 with st.sidebar.expander(tr("🟡 ربر أصفر - علوي (ذكر)", "🟡 Yellow Rubber - Top (Male)"), expanded=True):
-    ref_dict_yellow = GERMAN_YELLOW if origin_key == "ألماني" else CHINESE_YELLOW
+    ref_dict_yellow = st.session_state.live_inventory[origin_key]["yellow"]
     for s, qty in ref_dict_yellow.items(): 
-        active_top[s] = create_inventory_row(f"{tr('أصفر', 'Yellow')} {s} mm", qty, f"top_{s}")
+        active_top[s] = create_inventory_row(f"{tr('أصفر', 'Yellow')} {s} mm", qty, f"top_{origin_key}_{s}")
 
 with st.sidebar.expander(tr("🟢 ربر أخضر - سفلي (أنثى)", "🟢 Green Rubber - Bottom (Female)"), expanded=True):
-    ref_dict_green = GERMAN_GREEN if origin_key == "ألماني" else CHINESE_GREEN
+    ref_dict_green = st.session_state.live_inventory[origin_key]["green"]
     for s, qty in ref_dict_green.items(): 
-        active_bottom[s] = create_inventory_row(f"{tr('أخضر', 'Green')} {s} mm", qty, f"bot_{s}")
+        active_bottom[s] = create_inventory_row(f"{tr('أخضر', 'Green')} {s} mm", qty, f"bot_{origin_key}_{s}")
 
 calc = OrbitSlittingCalculator(top_inv=active_top, bottom_inv=active_bottom, spacer_inv=active_spacers)
 
-# Create 5 Tabs
+# Create 6 Tabs
 t1_name = tr("🔪 هندسة الشرحات (Slits)", "🔪 Slits Setup")
 t2_name = tr("⚙️ إعدادات الرأس (Head B)", "⚙️ Head B Offset")
 t3_name = tr("📐 حسابات الكويل (Coil Data)", "📐 Coil Calculations")
 t4_name = tr("📦 تخطيط الدفعات (Batches)", "📦 Batches Planning")
 t5_name = tr("🎛️ هندسة الشد (Tension)", "🎛️ Tension Specs")
+t6_name = tr("📸 معايرة الكاميرا (Camera)", "📸 Camera Alignment")
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([t1_name, t2_name, t3_name, t4_name, t5_name])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([t1_name, t2_name, t3_name, t4_name, t5_name, t6_name])
 
 # -----------------------------------------
-# TAB 1: MAIN SLIT CALCULATOR
+# TAB 1: MAIN SLIT CALCULATOR WITH LIVE DEDUCTION
 # -----------------------------------------
 with tab1:
-    st.header(tr("هندسة وتخطيط الشرحات (العلوي والسفلي المتطابق)", "Slit Arbor Engineering (Mirrored Setup)"))
+    st.header(tr("هندسة وتخطيط الشرحات (تجميع مجموعات)", "Slit Arbor Engineering (Group Setup)"))
     
     colA, colB = st.columns(2)
-    with colA: coil_width = st.number_input(tr("عرض الكويل الإجمالي (mm):", "Total Coil Width (mm):"), min_value=1.0, value=1000.0, step=1.0)
-    with colB: num_slits = st.number_input(tr("عدد الشرحات المطلوبة:", "Number of Slits:"), min_value=1, max_value=20, value=3, step=1)
+    with colA: coil_width = st.number_input(tr("عرض الكويل الإجمالي (mm):", "Total Coil Width (mm):"), min_value=1.0, value=1230.0, step=1.0, key="t1_cw")
+    with colB: coil_thickness = st.number_input(tr("سماكة الصاج (mm):", "Thickness (mm):"), min_value=0.01, value=0.40, step=0.01, key="t1_th")
         
     st.divider()
-    st.subheader(tr("أبعاد الشرحات", "Slit Widths Configuration"))
+    st.subheader(tr("إدخال الشرحات (مجموعات)", "Input Slits (By Groups)"))
     
     slit_widths = []
-    cols = st.columns(min(num_slits, 4))
-    for i in range(int(num_slits)):
-        with cols[i % len(cols)]:
-            w = st.number_input(f"{tr('عرض الشرحة', 'Slit Width')} {i+1} (mm):", min_value=0.1, value=float(coil_width/num_slits), step=0.1, key=f"slit_{i}")
-            slit_widths.append(w)
+    for i in range(5):
+        c1, c2 = st.columns(2)
+        with c1:
+            w = st.number_input(f"{tr('عرض الشرحة', 'Slit Width')} ({i+1}) mm:", min_value=0.0, value=0.0, step=0.1, key=f"grp_w_{i}")
+        with c2:
+            q = st.number_input(f"{tr('العدد المطلوب', 'Quantity')}:", min_value=0, value=0, step=1, key=f"grp_q_{i}")
+        if w > 0 and q > 0:
+            slit_widths.extend([w] * int(q))
             
     total_slits_width = sum(slit_widths)
-    if total_slits_width > coil_width:
-        st.error(tr("⚠️ خطأ: المجموع يتجاوز عرض الكويل!", "⚠️ Error: Total slits width exceeds Mother Coil width!"))
+    num_slits = len(slit_widths)
+    
+    st.divider()
+    
+    if num_slits == 0:
+        st.info(tr("يرجى إدخال الشرحات في المجموعات أعلاه للبدء.", "Please enter slit groups above to begin."))
+    elif total_slits_width > coil_width:
+        st.error(tr("⚠️ خطأ: مجموع عروض الشرحات يتجاوز عرض الكويل الإجمالي!", "⚠️ Error: Total slits width exceeds Mother Coil width!"))
     else:
-        st.success(f"{tr('✅ العرض سليم. الفواقد (Scrap Trim):', '✅ Width OK. Scrap Trim:')} {coil_width - total_slits_width:.2f} mm")
+        total_scrap = coil_width - total_slits_width
+        st.success(f"{tr('✅ العرض سليم. الفواقد (Scrap Trim الإجمالي):', '✅ Width OK. Total Scrap Trim:')} **{total_scrap:.2f} mm**")
         
         if st.button(tr("ابحث عن تشكيلات للعمودين", "🔍 Calculate Arbor Setups"), type="primary"):
-            spacer_targets = [w - calc.knife_width for w in slit_widths]
-            if any(t < 0 for t in spacer_targets):
-                st.error(tr("أحد الشرحات أصغر من عرض السكينة!", "A slit width is smaller than the knife thickness!"))
-            else:
-                options = calc.get_multiple_arbor_options(spacer_targets, max_options=5)
-                if options:
-                    st.info(tr("✅ الكمية مناسبة! تم تجميع الخيارات بشكل متطابق هندسياً.", "✅ Inventory Sufficient! Symmetrical setups found."))
-                    for i, arbor_setup in enumerate(options):
-                        
-                        if i == 0:
-                            st.markdown(f"""
-                            <div style="background-color: #e3f2fd; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #2196f3;">
-                                <h3 style="margin: 0; color: #0d47a1; text-align: center;">🚀 {tr('الخيار الأول: التجميع القياسي (أقل عدد قطع ممكن)', 'Option 1: Standard Setup (Minimum Pieces)')}</h3>
-                            </div>
-                            """, unsafe_allow_html=True)
+            st.session_state.calculated_targets = [w - calc.knife_width for w in slit_widths]
+            st.session_state.slit_widths_saved = slit_widths
+
+        # التحقق من وجود نتائج محسوبة مسبقاً لعرض أزرار الخصم التفاعلية بشكل مستقر
+        if 'calculated_targets' in st.session_state:
+            options = calc.get_multiple_arbor_options(st.session_state.calculated_targets, max_options=5)
+            if options:
+                st.info(tr("✅ تم حساب التشكيلات بنجاح. يمكنك اختيار أحد الحلول لخصمه من المخزن الحركي وتجربة القصة التالية:", 
+                           "✅ Setups calculated. Select a choice to deduct from live inventory and test subsequent consecutive slitting cycles:"))
+                
+                for i, arbor_setup in enumerate(options):
+                    if i == 0:
+                        st.markdown(f"""<div style='background-color: #e3f2fd; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #2196f3;'><h3 style='margin: 0; color: #0d47a1; text-align: center;'>🚀 {tr('الخيار الأول: التجميع القياسي (أقل عدد قطع ممكن)', 'Option 1: Standard Setup (Minimum Pieces)')}</h3></div>""", unsafe_allow_html=True)
+                    else:
+                        st.markdown(f"""<div style='background-color: #ffeb3b; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #fbc02d;'><h3 style='margin: 0; color: #000; text-align: center;'>🛠️ {tr(f'الخيار المرن رقم {i + 1} (تنويع ذكي لتسهيل التركيب)', f'Flexible Option {i + 1} (Smart Diversity Setup)')}</h3></div>""", unsafe_allow_html=True)
+                    
+                    total_rubbers = Counter()
+                    for setup in arbor_setup: total_rubbers.update(setup['rubbers_used'])
+                    
+                    # زر الخصم والاعتماد الخاص بكل خيار
+                    if st.button(tr(f"📥 اعتماد الخيار رقم {i+1} وخصمه من المخزن الحركي", f"📥 Apply Option {i+1} & Deduct from Live Inventory"), key=f"btn_deduct_{i}"):
+                        can_deduct = True
+                        # فحص كفاية المخزن قبل الخصم من الـ Session State
+                        for size, count in total_rubbers.items():
+                            if st.session_state.live_inventory[origin_key]["yellow"].get(size, 0) < count or st.session_state.live_inventory[origin_key]["green"].get(size, 0) < count:
+                                can_deduct = False
+                                break
+                        if can_deduct:
+                            for size, count in total_rubbers.items():
+                                st.session_state.live_inventory[origin_key]["yellow"][size] -= count
+                                st.session_state.live_inventory[origin_key]["green"][size] -= count
+                            st.success(tr("✅ تم خصم الربرات من المخزن الحركي بنجاح وتحديث القائمة الجانبية!", "✅ Successfully deducted from live inventory! Sidebar updated."))
+                            st.rerun()
                         else:
-                            st.markdown(f"""
-                            <div style="background-color: #ffeb3b; padding: 12px; border-radius: 8px; margin-top: 30px; margin-bottom: 15px; border: 2px solid #fbc02d;">
-                                <h3 style="margin: 0; color: #000; text-align: center;">🛠️ {tr(f'الخيار المرن رقم {i + 1} (تنويع ذكي لتسهيل التركيب)', f'Flexible Option {i + 1} (Smart Diversity Setup)')}</h3>
-                            </div>
-                            """, unsafe_allow_html=True)
-                        
-                        total_rubbers = Counter()
-                        for setup in arbor_setup: total_rubbers.update(setup['rubbers_used'])
+                            st.error(tr("❌ خطأ: الكمية المتبقية في المخزن لا تكفي لاعتماد هذا الخيار! جرب خياراً آخر أو اضغط Refresh.", "❌ Error: Insufficient dynamic inventory for this option! Reset or change option."))
+
+                    with st.expander(tr("📦 اضغط لمعرفة فاتورة المواد الإجمالية (BOM)", "📦 Click to view Bill of Materials (BOM)"), expanded=False):
+                        bom_c1, bom_c2 = st.columns(2)
+                        with bom_c1:
+                            st.info(tr("**العمود العلوي (🟡 ذكر)**", "**Top Arbor (🟡 Male)**"))
+                            st.write(f"- 🔪 {tr('سكينة', 'Knife')}: **{len(st.session_state.calculated_targets)} {tr('حبة', 'pcs')}**")
+                            for size, count in sorted(total_rubbers.items(), reverse=True):
+                                st.write(f"- {tr('ربر أصفر مقاس', 'Yellow Rubber size')} {size} mm: **{count} {tr('حبة', 'pcs')}**")
+                        with bom_c2:
+                            st.success(tr("**العمود السفلي (🟢 أنثى)**", "**Bottom Arbor (🟢 Female)**"))
+                            st.write(f"- 🔪 {tr('سكينة', 'Knife')}: **{len(st.session_state.calculated_targets)} {tr('حبة', 'pcs')}**")
+                            for size, count in sorted(total_rubbers.items(), reverse=True):
+                                st.write(f"- {tr('ربر أخضر مقاس', 'Green Rubber size')} {size} mm: **{count} {tr('حبة', 'pcs')}**")
                             
-                        with st.expander(tr("📦 اضغط لمعرفة فاتورة المواد الإجمالية (BOM)", "📦 Click to view Bill of Materials (BOM)"), expanded=False):
-                            bom_c1, bom_c2 = st.columns(2)
-                            with bom_c1:
-                                st.info(tr("**العمود العلوي (🟡 ذكر)**", "**Top Arbor (🟡 Male)**"))
-                                st.write(f"- 🔪 {tr('سكينة', 'Knife')}: **{num_slits} {tr('حبة', 'pcs')}**")
-                                for size, count in sorted(total_rubbers.items(), reverse=True):
-                                    st.write(f"- {tr('ربر أصفر مقاس', 'Yellow Rubber size')} {size} mm: **{count} {tr('حبة', 'pcs')}**")
-                            with bom_c2:
-                                st.success(tr("**العمود السفلي (🟢 أنثى)**", "**Bottom Arbor (🟢 Female)**"))
-                                st.write(f"- 🔪 {tr('سكينة', 'Knife')}: **{num_slits} {tr('حبة', 'pcs')}**")
-                                for size, count in sorted(total_rubbers.items(), reverse=True):
-                                    st.write(f"- {tr('ربر أخضر مقاس', 'Green Rubber size')} {size} mm: **{count} {tr('حبة', 'pcs')}**")
-                                
-                        st.markdown(f"### 🔍 {tr('تفاصيل التركيب المتطابق لكل شرحة:', 'Detailed Setup Per Slit:')}")
-                        for slit_idx, setup in enumerate(arbor_setup):
-                            st.markdown(f"#### 🔹 {tr('الشرحة', 'Slit')} {slit_idx + 1} ({slit_widths[slit_idx]:.2f} mm)")
-                            c1, c2 = st.columns(2)
-                            
-                            with c1:
-                                st.markdown(tr("🟡 **العمود العلوي (ذكر)**", "🟡 **Top Arbor (Male)**"))
-                                st.markdown(f"- 🔪 {tr('سكينة', 'Knife')}: 8.0 mm (x1)")
-                                if setup['top']['yellow']:
-                                    for s, q in sorted(Counter(setup['top']['yellow']).items(), reverse=True): st.markdown(f"- 🟡 {tr('ربر أصفر', 'Yellow Rubber')}: {s} mm (x{q})")
-                                if setup['top']['green']:
-                                    for s, q in sorted(Counter(setup['top']['green']).items(), reverse=True): st.markdown(f"- 🟢 {tr('ربر أخضر', 'Green Rubber')}: {s} mm (x{q})")
-                                if setup['top']['spacers']:
-                                    for s, q in sorted(Counter(setup['top']['spacers']).items(), reverse=True): st.markdown(f"- ⚙️ {tr('سبسر', 'Spacer')}: {s} mm (x{q})")
-                                    
-                            with c2:
-                                st.markdown(tr("🟢 **العمود السفلي (أنثى)**", "🟢 **Bottom Arbor (Female)**"))
-                                st.markdown(f"- 🔪 {tr('سكينة', 'Knife')}: 8.0 mm (x1)")
-                                if setup['bottom']['green']:
-                                    for s, q in sorted(Counter(setup['bottom']['green']).items(), reverse=True): st.markdown(f"- 🟢 {tr('ربر أخضر', 'Green Rubber')}: {s} mm (x{q})")
-                                if setup['bottom']['yellow']:
-                                    for s, q in sorted(Counter(setup['bottom']['yellow']).items(), reverse=True): st.markdown(f"- 🟡 {tr('ربر أصفر', 'Yellow Rubber')}: {s} mm (x{q})")
-                                if setup['bottom']['spacers']:
-                                    for s, q in sorted(Counter(setup['bottom']['spacers']).items(), reverse=True): st.markdown(f"- ⚙️ {tr('سبسر', 'Spacer')}: {s} mm (x{q})")
-                            st.markdown("---")
-                else:
-                    st.error(tr("❌ المخزون المزدوج (الأصفر والأخضر معاً لنفس المقاس) لا يكفي لتركيب العمودين.", "❌ Dual inventory (Yellow & Green combined) is insufficient for this setup."))
+                    st.markdown(f"### 🔍 {tr('تفاصيل التركيب المتطابق لكل شرحة:', 'Detailed Setup Per Slit:')}")
+                    for slit_idx, setup in enumerate(arbor_setup):
+                        st.markdown(f"#### 🔹 {tr('الشرحة', 'Slit')} {slit_idx + 1} ({st.session_state.slit_widths_saved[slit_idx]:.2f} mm)")
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            st.markdown(tr("🟡 **العمود العلوي (ذكر)**", "🟡 **Top Arbor (Male)**"))
+                            st.markdown(f"- 🔪 {tr('سكينة', 'Knife')}: 8.0 mm (x1)")
+                            if setup['top']['yellow']:
+                                for s, q in sorted(Counter(setup['top']['yellow']).items(), reverse=True): st.markdown(f"- 🟡 {tr('ربر أصفر', 'Yellow Rubber')}: {s} mm (x{q})")
+                            if setup['top']['green']:
+                                for s, q in sorted(Counter(setup['top']['green']).items(), reverse=True): st.markdown(f"- 🟢 {tr('ربر أخضر', 'Green Rubber')}: {s} mm (x{q})")
+                            if setup['top']['spacers']:
+                                for s, q in sorted(Counter(setup['top']['spacers']).items(), reverse=True): st.markdown(f"- ⚙️ {tr('سبسر', 'Spacer')}: {s} mm (x{q})")
+                        with c2:
+                            st.markdown(tr("🟢 **العمود السفلي (أنثى)**", "🟢 **Bottom Arbor (Female)**"))
+                            st.markdown(f"- 🔪 {tr('سكينة', 'Knife')}: 8.0 mm (x1)")
+                            if setup['bottom']['green']:
+                                for s, q in sorted(Counter(setup['bottom']['green']).items(), reverse=True): st.markdown(f"- 🟢 {tr('ربر أخضر', 'Green Rubber')}: {s} mm (x{q})")
+                            if setup['bottom']['yellow']:
+                                for s, q in sorted(Counter(setup['bottom']['yellow']).items(), reverse=True): st.markdown(f"- 🟡 {tr('ربر أصفر', 'Yellow Rubber')}: {s} mm (x{q})")
+                            if setup['bottom']['spacers']:
+                                for s, q in sorted(Counter(setup['bottom']['spacers']).items(), reverse=True): st.markdown(f"- ⚙️ {tr('سبسر', 'Spacer')}: {s} mm (x{q})")
+                        st.markdown("---")
+            else:
+                st.error(tr("❌ المخزون لا يكفي لتركيب هذه الشرحات بناءً على الكميات الحالية المتبقية.", "❌ Inventory insufficient based on currently remaining dynamic stock."))
 
 # -----------------------------------------
 # TAB 2: HEAD B OFFSET
@@ -392,7 +424,6 @@ with tab3:
     if st.button(tr("احسب بيانات الكويل", "Calculate Coil Data"), type="primary"):
         weight_per_meter = thickness_coil * width_m * density
         if weight_per_meter > 0:
-            
             if "من الوزن" in calc_mode or "from Weight" in calc_mode:
                 coil_length = coil_weight / weight_per_meter
             elif "من الطول" in calc_mode or "from Length" in calc_mode:
@@ -436,8 +467,8 @@ with tab5:
     with col_t1:
         sel_alloy = st.selectbox(tr("نوع السبيكة (Alloy):", "Alloy Type:"), ["3105", "1050", "1100", "3003", "5005", "5052", "8011", tr("أخرى...", "Other...")])
         alloy_input = st.text_input(tr("إدخال يدوي:", "Manual Input:"), value="3105") if sel_alloy in ["أخرى...", "Other..."] else sel_alloy
-    with col_t2: tension_thickness = st.number_input(tr("سماكة الصاج (mm) لحساب الشد:", "Thickness for Tension (mm):"), min_value=0.01, value=0.27)
-    with col_t3: tension_width = st.number_input(tr("إجمالي عرض الشرحات (mm):", "Total Slits Width (mm):"), min_value=1.0, value=1230.0)
+    with col_t2: tension_thickness = st.number_input(tr("سماكة الصاج (mm) لحساب الشد:", "Thickness for Tension (mm):"), min_value=0.01, value=0.27, key="tens_thick")
+    with col_t3: tension_width = st.number_input(tr("إجمالي عرض الشرحات (mm):", "Total Slits Width (mm):"), min_value=1.0, value=1230.0, key="tens_width")
         
     if st.button(tr("⚙️ تحليل وحساب الشد", "⚙️ Analyze and Calculate Tension"), type="primary"):
         cls, rec_t, back_t, t_pct, end_t, t_reason = analyze_alloy(alloy_input, tension_thickness, tension_width)
@@ -452,3 +483,62 @@ with tab5:
         with col_bar2:
             st.markdown(f"**{tr('سينخفض من', 'Will taper down from')} `{rec_t:,.0f} Kg` {tr('إلى', 'to')} `{end_t:,.0f} Kg`**")
             st.progress(1.0 - (t_pct / 100.0))
+
+# -----------------------------------------
+# TAB 6: CAMERA CALIBRATION (EMG SPC 16)
+# -----------------------------------------
+with tab6:
+    st.header(tr("📸 نظام توجيه الحواف EMG SPC 16 (معالجة الزقزاق)", "📸 EMG SPC 16 Edge Tracking & Zigzag Control"))
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        cam_coil_w = st.number_input(tr("عرض الكويل الإجمالي (mm):", "Total Mother Coil Width (mm):"), min_value=1.0, value=1230.0, key="cam_cw_t6")
+    
+    st.divider()
+    st.subheader(tr("إدخال الشرحات لحساب التريم (الرايشة)", "Input Slits for Scrap Trim Calc"))
+    cam_slit_widths = []
+    for i in range(5):
+        c1, c2 = st.columns(2)
+        with c1:
+            w = st.number_input(f"{tr('عرض الشرحة', 'Slit Width')} ({i+1}) mm:", min_value=0.0, value=0.0, step=0.1, key=f"cam_grp_w_t6_{i}")
+        with c2:
+            q = st.number_input(f"{tr('العدد المطلوب', 'Quantity')}:", min_value=0, value=0, step=1, key=f"cam_grp_q_t6_{i}")
+        if w > 0 and q > 0:
+            cam_slit_widths.extend([w] * int(q))
+            
+    cam_total_slits = sum(cam_slit_widths)
+    st.divider()
+    
+    if len(cam_slit_widths) > 0:
+        total_scrap = cam_coil_w - cam_total_slits
+        if total_scrap < 0:
+            st.error(tr("⚠️ خطأ: مجموع عروض الشرحات يتجاوز عرض الكويل الإجمالي!", "⚠️ Error: Slits sum exceeds the total mother coil width!"))
+        else:
+            trim_per_side = total_scrap / 2.0
+            camera_target_value = trim_per_side + 6.0 
+            
+            c_m1, c_m2, c_m3 = st.columns(3)
+            with c_m1: st.markdown(f"""<div class='metric-card'><h4 style='margin:0; color:#0056b3;'>{tr('إجمالي الرايشة (Total Scrap)', 'Total Scrap Trim')}</h4><h2 style='margin:0;'>{total_scrap:,.2f} mm</h2></div>""", unsafe_allow_html=True)
+            with c_m2: st.markdown(f"""<div class='metric-card' style='border-left-color: #28a745;'><h4 style='margin:0; color:#28a745;'>{tr('الرايشة لكل طرف (Trim per Side)', 'Scrap Value Per Side')}</h4><h2 style='margin:0;'>{trim_per_side:.2f} mm</h2></div>""", unsafe_allow_html=True)
+            with c_m3: st.markdown(f"""<div class='metric-card' style='border-left-color: #ff9800;'><h4 style='margin:0; color:#ff9800;'>{tr('🎯 موضع الصفر (Target Value)', '🎯 Camera Base Target')}</h4><h2 style='margin:0; color:#ff9800;'>{camera_target_value:.2f} mm</h2></div>""", unsafe_allow_html=True)
+            
+            st.markdown("---")
+            st.subheader(tr("⚡ الدليل الميداني لإعدادات شاشة (EMG)", "⚡ Field Guide for EMG Parameters"))
+            
+            if trim_per_side <= 3.0:
+                p021_val, alert_type = "12.0 - 13.0", "error"
+                p021_warn = tr("تنبيه حرج: الرايشة صغيرة جداً! يجب رفع السرعة (Gain) بحذر شديد للحاق بالزقزاق. إذا بدأت الماكينة بالاهتزاز (Hunting) أو صدر صوت خبط، انزل بالقيمة فوراً إلى 10.", "CRITICAL: Very small trim! Increase Gain cautiously to catch zigzag. If mechanical hunting/vibration occurs, immediately drop back to 10.")
+            elif trim_per_side <= 8.0:
+                p021_val, alert_type = "8.0 - 10.0", "warning"
+                p021_warn = tr("الوضع مستقر: هذا الكسب يوفر سرعة استجابة متوازنة للحاق بانحرافات الكويل دون إرهاق بلف الهيدروليك.", "STABLE: This Gain provides balanced response speed to track coil deviation without stressing the hydraulic proportional valve.")
+            else:
+                p021_val, alert_type = "5.0 - 7.0", "success"
+                p021_warn = tr("الوضع آمن: الرايشة كبيرة. قم بخفض الكسب لجعل تصحيح المسار ناعماً وتجنب التفاعل مع التموجات الصغيرة غير المؤثرة.", "SAFE: Large trim margin. Lower the Gain to smooth out the tracking movement and ignore non-critical minor ripples.")
+                
+            col_g1, col_g2 = st.columns(2)
+            with col_g1:
+                st.info(f"**1. `P021 GAIN AUTO` {tr('(سرعة تصحيح المسار)', '(Correction Response Speed)')}:**\n\n🎯 **{tr('القيمة الموصى بها الآن:', 'Recommended Value Now:')}** `{p021_val}`")
+                if alert_type == "error": st.error(p021_warn)
+                elif alert_type == "warning": st.warning(p021_warn)
+                else: st.success(p021_warn)
+            with col_g2:
+                st.warning(f"**2. `P005 MEAS RANGE` {tr('(خطر العمى المؤقت)', '(Temporary Blindness Risk)')}:**\n\n⏱️ **{tr('مجال الرؤية الثابت:', 'Fixed Field of View:')}** `24.0 mm`\n\n_{tr('إذا كان الزقزاق عنيفاً وتحرك الصاج أكثر من 12 مم لليمين أو اليسار من مركز الحساس، ستخرج الحافة من عدسة الكاميرا وتتوقف عن التوجيه تماماً!', 'If zigzag is severe and strip shifts >12mm off-center, the edge drops out of the camera lens and stops automatic tracking completely!')}_")
